@@ -119,6 +119,10 @@ def train_model_with_dpsgd(model, train_dataset, eval_dataset, config, device):
         
         avg_loss = epoch_loss / len(train_loader)
         print(f"Epoch {epoch+1} average loss: {avg_loss:.4f}")
+
+        # Save an epoch checkpoint before evaluation
+        os.makedirs("models", exist_ok=True)
+        torch.save(model.state_dict(), f"models/checkpoint_{config.task_name}_no_dp_epoch{epoch+1}.pt")
         
         # Evaluation
         metrics = evaluate_model(model, eval_loader, config, device)
@@ -219,6 +223,10 @@ def train_model_without_dp(model, train_dataset, eval_dataset, config, device):
         
         avg_loss = epoch_loss / len(train_loader)
         print(f"Epoch {epoch+1} average loss: {avg_loss:.4f}")
+
+        # Save an epoch checkpoint before evaluation
+        os.makedirs("models", exist_ok=True)
+        torch.save(model.state_dict(), f"models/checkpoint_{config.task_name}_eps{config.epsilon}_epoch{epoch+1}.pt")
         
         # Evaluation
         metrics = evaluate_model(model, eval_loader, config, device)
@@ -275,7 +283,7 @@ def evaluate_model(model, eval_loader, config, device):
                 token_type_ids=batch['token_type_ids'] if 'token_type_ids' in batch else None
             )
             
-            logits = outputs[1] if isinstance(outputs, tuple) else outputs
+            logits = outputs.logits if hasattr(outputs, "logits") else (outputs[1] if isinstance(outputs, tuple) else outputs)
             
             # Get predictions
             if is_token_classification:
