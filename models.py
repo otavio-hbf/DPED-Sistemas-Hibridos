@@ -436,7 +436,7 @@ class TeacherEnsemble:
                         )
                     
                     # Get class probabilities
-                    logits = outputs[1] if isinstance(outputs, tuple) else outputs
+                    logits = outputs.logits if hasattr(outputs, "logits") else (outputs[1] if isinstance(outputs, tuple) else outputs)
                     probs = softmax(logits, dim=-1)
                     teacher_predictions.append(probs)
             
