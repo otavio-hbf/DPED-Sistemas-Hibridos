@@ -1,8 +1,9 @@
-torch>=1.7.0,<2.1.0
-transformers>=4.0.0
-datasets>=1.0.0
+torch
+transformers>=4.0,<5
+datasets>=2.18,<3
 opacus==1.4.0
 numpy>=1.19.0
 scikit-learn>=0.24.0
 tqdm>=4.50.0
-matplotlib>=3.3.0 
+matplotlib>=3.3.0
+huggingface_hub<1.0
