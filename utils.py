@@ -45,25 +45,26 @@ def compute_metrics(predictions, labels, task):
     
     # Calculate metrics based on task
     results = {}
+
+    def classification_average():
+        unique_labels = np.unique(labels)
+        return 'binary' if len(unique_labels) <= 2 else 'macro'
     
     if task in ["sst2", "mnli", "cola"]:
         # Classification tasks
         results["accuracy"] = accuracy_score(labels, predictions)
-        if task != "mnli":  # Binary classification
-            results["precision"] = precision_score(labels, predictions, average='binary')
-            results["recall"] = recall_score(labels, predictions, average='binary')
-            results["f1"] = f1_score(labels, predictions, average='binary')
-        else:  # Multi-class classification
-            results["precision"] = precision_score(labels, predictions, average='macro')
-            results["recall"] = recall_score(labels, predictions, average='macro')
-            results["f1"] = f1_score(labels, predictions, average='macro')
+        average = classification_average()
+        results["precision"] = precision_score(labels, predictions, average=average)
+        results["recall"] = recall_score(labels, predictions, average=average)
+        results["f1"] = f1_score(labels, predictions, average=average)
     
     elif task == "qqp":
         # Paraphrase detection
         results["accuracy"] = accuracy_score(labels, predictions)
-        results["precision"] = precision_score(labels, predictions, average='binary')
-        results["recall"] = recall_score(labels, predictions, average='binary')
-        results["f1"] = f1_score(labels, predictions, average='binary')
+        average = classification_average()
+        results["precision"] = precision_score(labels, predictions, average=average)
+        results["recall"] = recall_score(labels, predictions, average=average)
+        results["f1"] = f1_score(labels, predictions, average=average)
     
     elif task == "conll2003":
         # NER task
