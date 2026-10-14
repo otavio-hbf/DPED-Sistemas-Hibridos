@@ -195,12 +195,12 @@ class TeacherEnsemble:
         # Initialize teacher models based on task type
         for i in range(self.num_teachers):
             if config.dataset_name == "conll2003":
-                teacher_model = BertForTokenClassification(config).to(device)
+                teacher_model = BertForTokenClassification(config)
             else:
                 teacher_model = BertForSequenceClassification.from_pretrained(
                     config.bert_model, 
                     num_labels=self._get_num_labels()
-                ).to(device)
+                )
             
             self.teacher_models.append(teacher_model)
             
@@ -225,6 +225,8 @@ class TeacherEnsemble:
         """Train all teacher models on their respective datasets."""
         for teacher_idx, (teacher_model, teacher_dataset) in enumerate(zip(self.teacher_models, self.teacher_datasets)):
             print(f"\nTraining Teacher {teacher_idx+1}/{self.num_teachers}")
+
+            teacher_model = teacher_model.to(self.device)
             
             # Create dataloader for this teacher
             teacher_loader = DataLoader(
@@ -282,9 +284,13 @@ class TeacherEnsemble:
                     optimizer.zero_grad()
                     
                     epoch_loss += loss.item()
-                
+
                 avg_loss = epoch_loss / len(teacher_loader)
                 print(f"Teacher {teacher_idx+1}, Epoch {epoch+1} average loss: {avg_loss:.4f}")
+
+            teacher_model.to("cpu")
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
     
     def get_token_frequency(self, public_dataset):
         """
@@ -360,11 +366,13 @@ class TeacherEnsemble:
             # Get embeddings from each teacher
             teacher_outputs = []
             for teacher in self.teacher_models:
+                teacher = teacher.to(self.device)
                 teacher.eval()
                 with torch.no_grad():
                     # Extract the embedding layer output
                     embedding_output = teacher.bert.embeddings.word_embeddings(input_ids)
                     teacher_outputs.append(embedding_output)
+                teacher.to("cpu")
             
             # Stack and average teacher outputs
             stacked_outputs = torch.stack(teacher_outputs)  # [num_teachers, batch_size, seq_len, embed_dim]
@@ -420,6 +428,7 @@ class TeacherEnsemble:
             # Get predictions from each teacher
             teacher_predictions = []
             for teacher in self.teacher_models:
+                teacher = teacher.to(self.device)
                 teacher.eval()
                 with torch.no_grad():
                     if self.config.dataset_name == "conll2003":
@@ -439,6 +448,7 @@ class TeacherEnsemble:
                     logits = outputs.logits if hasattr(outputs, "logits") else (outputs[1] if isinstance(outputs, tuple) else outputs)
                     probs = softmax(logits, dim=-1)
                     teacher_predictions.append(probs)
+                teacher.to("cpu")
             
             # Stack teacher predictions
             stacked_preds = torch.stack(teacher_predictions, dim=0)  # [num_teachers, batch_size, num_classes]
