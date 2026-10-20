@@ -42,6 +42,17 @@ def compute_metrics(predictions, labels, task):
         predictions = predictions.cpu().numpy()
     if isinstance(labels, torch.Tensor):
         labels = labels.cpu().numpy()
+
+    # Some benchmark test splits (e.g., GLUE) can use -1 for unknown labels.
+    # Filter them out to avoid invalid metric computation.
+    labels = labels.reshape(-1)
+    predictions = predictions.reshape(-1)
+    valid_mask = labels != -1
+    labels = labels[valid_mask]
+    predictions = predictions[valid_mask]
+
+    if len(labels) == 0:
+        return {"accuracy": 0.0, "precision": 0.0, "recall": 0.0, "f1": 0.0}
     
     # Calculate metrics based on task
     results = {}
@@ -54,17 +65,17 @@ def compute_metrics(predictions, labels, task):
         # Classification tasks
         results["accuracy"] = accuracy_score(labels, predictions)
         average = classification_average()
-        results["precision"] = precision_score(labels, predictions, average=average)
-        results["recall"] = recall_score(labels, predictions, average=average)
-        results["f1"] = f1_score(labels, predictions, average=average)
+        results["precision"] = precision_score(labels, predictions, average=average, zero_division=0)
+        results["recall"] = recall_score(labels, predictions, average=average, zero_division=0)
+        results["f1"] = f1_score(labels, predictions, average=average, zero_division=0)
     
     elif task == "qqp":
         # Paraphrase detection
         results["accuracy"] = accuracy_score(labels, predictions)
         average = classification_average()
-        results["precision"] = precision_score(labels, predictions, average=average)
-        results["recall"] = recall_score(labels, predictions, average=average)
-        results["f1"] = f1_score(labels, predictions, average=average)
+        results["precision"] = precision_score(labels, predictions, average=average, zero_division=0)
+        results["recall"] = recall_score(labels, predictions, average=average, zero_division=0)
+        results["f1"] = f1_score(labels, predictions, average=average, zero_division=0)
     
     elif task == "conll2003":
         # NER task

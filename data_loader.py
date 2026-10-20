@@ -27,7 +27,8 @@ def load_glue_dataset(config):
         train_dataset = datasets["train"]
         if "validation" in datasets:
             eval_dataset = datasets["validation"]
-            test_dataset = datasets["test"] if "test" in datasets else datasets["validation"]
+            # GLUE test splits are typically unlabeled (label = -1), so use validation as labeled test set.
+            test_dataset = datasets["validation"]
         else:
             # Split the training set if no validation set is available
             train_size = int(config.train_test_split_ratio * len(train_dataset))
