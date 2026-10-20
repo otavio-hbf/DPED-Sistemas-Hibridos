@@ -80,7 +80,7 @@ def train_model_with_dpsgd(model, train_dataset, eval_dataset, config, device):
     )
     
     # Training loop
-    best_metric = 0
+    best_metric = -float("inf")
     best_metrics = {}
     for epoch in range(config.num_epochs):
         # Training
@@ -122,7 +122,7 @@ def train_model_with_dpsgd(model, train_dataset, eval_dataset, config, device):
 
         # Save an epoch checkpoint before evaluation
         os.makedirs("models", exist_ok=True)
-        torch.save(model.state_dict(), f"models/checkpoint_{config.task_name}_no_dp_epoch{epoch+1}.pt")
+        torch.save(model.state_dict(), f"models/checkpoint_{config.task_name}_eps{config.epsilon}_epoch{epoch+1}.pt")
         
         # Evaluation
         metrics = evaluate_model(model, eval_loader, config, device)
@@ -188,7 +188,7 @@ def train_model_without_dp(model, train_dataset, eval_dataset, config, device):
     )
     
     # Training loop
-    best_metric = 0
+    best_metric = -float("inf")
     best_metrics = {}
     for epoch in range(config.num_epochs):
         # Training
@@ -226,7 +226,7 @@ def train_model_without_dp(model, train_dataset, eval_dataset, config, device):
 
         # Save an epoch checkpoint before evaluation
         os.makedirs("models", exist_ok=True)
-        torch.save(model.state_dict(), f"models/checkpoint_{config.task_name}_eps{config.epsilon}_epoch{epoch+1}.pt")
+        torch.save(model.state_dict(), f"models/checkpoint_{config.task_name}_no_dp_epoch{epoch+1}.pt")
         
         # Evaluation
         metrics = evaluate_model(model, eval_loader, config, device)

@@ -47,8 +47,8 @@ def compute_metrics(predictions, labels, task):
     results = {}
 
     def classification_average():
-        unique_labels = np.unique(labels)
-        return 'binary' if len(unique_labels) <= 2 else 'macro'
+        unique_values = np.unique(np.concatenate([labels.reshape(-1), predictions.reshape(-1)]))
+        return 'binary' if len(unique_values) <= 2 else 'macro'
     
     if task in ["sst2", "mnli", "cola"]:
         # Classification tasks
