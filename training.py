@@ -66,10 +66,10 @@ def train_model_with_dpsgd(model, train_dataset, eval_dataset, config, device):
             max_grad_norm=config.max_grad_norm,
         )
         
-        # Get the actual noise multiplier
-        noise_multiplier = privacy_engine.accountant.get_privacy_spent(target_delta=config.delta)[0]
-        print(f"For target ε={config.epsilon}, δ={config.delta}:")
-        print(f"Using noise multiplier: {noise_multiplier}")
+        # In Opacus 1.4.0 (PRVAccountant), use get_epsilon(delta) to query spent privacy.
+        spent_epsilon = privacy_engine.accountant.get_epsilon(delta=config.delta)
+        print(f"Target privacy: ε={config.epsilon}, δ={config.delta}")
+        print(f"Initial accounted privacy (before training steps): ε={spent_epsilon:.4f}")
     
     # Set up learning rate scheduler
     total_steps = len(train_loader) * config.num_epochs
