@@ -12,6 +12,7 @@ from opacus import PrivacyEngine
 from opacus.utils.batch_memory_manager import BatchMemoryManager
 import numpy as np
 import os
+import warnings
 
 from utils import compute_metrics
 
@@ -65,17 +66,33 @@ def train_model_with_dpsgd(model, train_dataset, eval_dataset, config, device):
     # Set up DP-SGD if enabled
     if config.enable_dp:
         privacy_engine = PrivacyEngine()
-        
-        # Attach privacy engine to optimizer
-        model, optimizer, train_loader = privacy_engine.make_private_with_epsilon(
-            module=model,
-            optimizer=optimizer,
-            data_loader=train_loader,
-            epochs=config.num_epochs,
-            target_epsilon=config.epsilon,
-            target_delta=config.delta,
-            max_grad_norm=config.max_grad_norm,
-        )
+
+        # Attach privacy engine to optimizer.
+        # functorch mode is more robust for custom forward graphs.
+        try:
+            model, optimizer, train_loader = privacy_engine.make_private_with_epsilon(
+                module=model,
+                optimizer=optimizer,
+                data_loader=train_loader,
+                epochs=config.num_epochs,
+                target_epsilon=config.epsilon,
+                target_delta=config.delta,
+                max_grad_norm=config.max_grad_norm,
+                grad_sample_mode="functorch",
+            )
+        except TypeError:
+            warnings.warn(
+                "Opacus version does not support grad_sample_mode; falling back to default mode."
+            )
+            model, optimizer, train_loader = privacy_engine.make_private_with_epsilon(
+                module=model,
+                optimizer=optimizer,
+                data_loader=train_loader,
+                epochs=config.num_epochs,
+                target_epsilon=config.epsilon,
+                target_delta=config.delta,
+                max_grad_norm=config.max_grad_norm,
+            )
 
         print(f"Target privacy: ε={config.epsilon}, δ={config.delta}")
         print("Initial accounted privacy will be reported after the first optimization step.")
