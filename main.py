@@ -217,7 +217,7 @@ def run_method(method, train_dataset, eval_dataset, test_dataset, public_dataset
         config_copy = Config()
         for key, value in vars(config).items():
             setattr(config_copy, key, value)
-        config_copy.enable_dp = True
+        config_copy.enable_dp = config.enable_dp
         config_copy.multi_layer_noise = False  # No multi-layer noise for PATE baseline
         
         # Create and train teacher ensemble
@@ -232,8 +232,11 @@ def run_method(method, train_dataset, eval_dataset, test_dataset, public_dataset
         # Switch to Opacus-friendly classifier before DP-SGD.
         model = build_dp_compatible_model(model, config_copy, device)
         
-        # Optional: fine-tune with DP-SGD
-        model, _ = train_model_with_dpsgd(model, train_dataset, eval_dataset, config_copy, device)
+        # Fine-tune with DP-SGD only when DP is enabled.
+        if config_copy.enable_dp:
+            model, _ = train_model_with_dpsgd(model, train_dataset, eval_dataset, config_copy, device)
+        else:
+            model, _ = train_model_without_dp(model, train_dataset, eval_dataset, config_copy, device)
     
     elif method == "dp-distill":
         # Our proposed method: Teacher-Student Distillation with Multi-Layer DP
@@ -247,8 +250,11 @@ def run_method(method, train_dataset, eval_dataset, test_dataset, public_dataset
         # Switch to Opacus-friendly classifier before DP-SGD.
         model = build_dp_compatible_model(model, config, device)
         
-        # Then fine-tune with DP-SGD and multi-layer noise
-        model, _ = train_model_with_dpsgd(model, train_dataset, eval_dataset, config, device)
+        # Then fine-tune with DP-SGD (or standard training when --no_dp is set).
+        if config.enable_dp:
+            model, _ = train_model_with_dpsgd(model, train_dataset, eval_dataset, config, device)
+        else:
+            model, _ = train_model_without_dp(model, train_dataset, eval_dataset, config, device)
     
     else:
         raise ValueError(f"Unknown method: {method}")
