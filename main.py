@@ -138,6 +138,27 @@ def update_config_from_args(config, args):
     return config
 
 
+def build_dp_compatible_model(model, config, device):
+    """Convert custom student to HF classifier for Opacus compatibility."""
+    if not isinstance(model, StudentModel):
+        return model
+
+    num_labels = 2 if config.task_name in ["sst2", "qqp", "cola"] else 3
+    dp_model = BertForSequenceClassification.from_pretrained(
+        config.bert_model,
+        num_labels=num_labels
+    ).to(device)
+
+    src_state = model.state_dict()
+    dst_state = dp_model.state_dict()
+    for name in dst_state.keys():
+        if name in src_state and src_state[name].shape == dst_state[name].shape:
+            dst_state[name] = src_state[name].detach().clone()
+    dp_model.load_state_dict(dst_state)
+
+    return dp_model
+
+
 def run_method(method, train_dataset, eval_dataset, test_dataset, public_dataset, config, device):
     """
     Run a specific method for training with differential privacy.
@@ -207,6 +228,9 @@ def run_method(method, train_dataset, eval_dataset, test_dataset, public_dataset
         from torch.utils.data import DataLoader
         train_loader = DataLoader(train_dataset, batch_size=config_copy.batch_size, shuffle=True)
         model = pate_distillation(teacher_ensemble, model, public_dataset, train_loader, config_copy, device)
+
+        # Switch to Opacus-friendly classifier before DP-SGD.
+        model = build_dp_compatible_model(model, config_copy, device)
         
         # Optional: fine-tune with DP-SGD
         model, _ = train_model_with_dpsgd(model, train_dataset, eval_dataset, config_copy, device)
@@ -219,6 +243,9 @@ def run_method(method, train_dataset, eval_dataset, test_dataset, public_dataset
         
         # First distill embeddings
         model = distill_embeddings(teacher_ensemble, model, public_dataset, config, device)
+
+        # Switch to Opacus-friendly classifier before DP-SGD.
+        model = build_dp_compatible_model(model, config, device)
         
         # Then fine-tune with DP-SGD and multi-layer noise
         model, _ = train_model_with_dpsgd(model, train_dataset, eval_dataset, config, device)

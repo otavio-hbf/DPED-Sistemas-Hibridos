@@ -65,7 +65,8 @@ def train_model_with_dpsgd(model, train_dataset, eval_dataset, config, device):
     
     # Set up DP-SGD if enabled
     if config.enable_dp:
-        privacy_engine = PrivacyEngine()
+        # RDP accountant is more numerically stable for tiny fast-check runs.
+        privacy_engine = PrivacyEngine(accountant="rdp")
 
         # Attach privacy engine to optimizer.
         # functorch mode is more robust for custom forward graphs.
@@ -94,7 +95,7 @@ def train_model_with_dpsgd(model, train_dataset, eval_dataset, config, device):
                 max_grad_norm=config.max_grad_norm,
             )
 
-        print(f"Target privacy: ε={config.epsilon}, δ={config.delta}")
+        print(f"Target privacy: ε={config.epsilon}, δ={config.delta} (accountant=rdp)")
         print("Initial accounted privacy will be reported after the first optimization step.")
     
     # Set up learning rate scheduler
