@@ -35,6 +35,12 @@ class Config:
         self.dataset_name = "glue"
         self.task_name = "sst2"  # Options: sst2, qqp, mnli, cola
         self.train_test_split_ratio = 0.8
+        self.max_train_samples = None
+        self.max_eval_samples = None
+        self.max_test_samples = None
+        self.max_public_samples = 10000
+        self.random_subset = True
+        self.subset_seed = 42
         
     def update_epsilon(self, new_epsilon):
         """Update epsilon and related parameters"""

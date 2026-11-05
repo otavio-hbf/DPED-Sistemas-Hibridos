@@ -67,6 +67,20 @@ def parse_args():
                         help="Weight decay")
     parser.add_argument("--seed", type=int, default=42,
                         help="Random seed")
+
+    # Fast-check dataset subset parameters
+    parser.add_argument("--max_train_samples", type=int, default=None,
+                        help="Maximum number of training samples (None uses full split)")
+    parser.add_argument("--max_eval_samples", type=int, default=None,
+                        help="Maximum number of evaluation samples (None uses full split)")
+    parser.add_argument("--max_test_samples", type=int, default=None,
+                        help="Maximum number of test samples (None uses full split)")
+    parser.add_argument("--max_public_samples", type=int, default=10000,
+                        help="Maximum number of public samples for distillation")
+    parser.add_argument("--subset_strategy", type=str, default="random", choices=["random", "head"],
+                        help="Subset strategy for max_*_samples")
+    parser.add_argument("--subset_seed", type=int, default=42,
+                        help="Seed used when subset_strategy is random")
     
     # Experiment parameters
     parser.add_argument("--method", type=str, default="dp-distill",
@@ -112,6 +126,14 @@ def update_config_from_args(config, args):
     config.learning_rate = args.learning_rate
     config.num_epochs = args.num_epochs
     config.weight_decay = args.weight_decay
+
+    # Subset parameters
+    config.max_train_samples = args.max_train_samples
+    config.max_eval_samples = args.max_eval_samples
+    config.max_test_samples = args.max_test_samples
+    config.max_public_samples = args.max_public_samples
+    config.random_subset = args.subset_strategy == "random"
+    config.subset_seed = args.subset_seed
     
     return config
 
@@ -318,7 +340,7 @@ def main():
     print(f"Test dataset size: {len(test_dataset)}")
     
     # Create public dataset for distillation
-    public_dataset = create_public_dataset(config)
+    public_dataset = create_public_dataset(config, size=config.max_public_samples)
     print(f"Public dataset size: {len(public_dataset)}")
     
     # Run experiments

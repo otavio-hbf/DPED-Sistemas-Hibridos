@@ -5,6 +5,24 @@ from datasets import load_dataset
 from transformers import BertTokenizer
 from torch.utils.data import random_split
 
+
+def _subset_split(dataset, max_samples=None, random_subset=True, seed=42):
+    """Return a subset of a Hugging Face split when max_samples is provided."""
+    if max_samples is None:
+        return dataset
+
+    max_samples = int(max_samples)
+    if max_samples <= 0:
+        return dataset.select([])
+
+    subset_size = min(max_samples, len(dataset))
+    if subset_size == len(dataset):
+        return dataset
+
+    if random_subset:
+        dataset = dataset.shuffle(seed=seed)
+    return dataset.select(range(subset_size))
+
 def load_glue_dataset(config):
     """
     Load datasets from the GLUE benchmark.
@@ -38,6 +56,30 @@ def load_glue_dataset(config):
                 [train_size, eval_size]
             )
             test_dataset = eval_dataset
+
+    # Apply optional split limits for quick integrity checks.
+    # This assumes Hugging Face dataset splits (the default path for GLUE tasks).
+    if hasattr(train_dataset, "select"):
+        train_dataset = _subset_split(
+            train_dataset,
+            max_samples=config.max_train_samples,
+            random_subset=config.random_subset,
+            seed=config.subset_seed
+        )
+    if hasattr(eval_dataset, "select"):
+        eval_dataset = _subset_split(
+            eval_dataset,
+            max_samples=config.max_eval_samples,
+            random_subset=config.random_subset,
+            seed=config.subset_seed
+        )
+    if hasattr(test_dataset, "select"):
+        test_dataset = _subset_split(
+            test_dataset,
+            max_samples=config.max_test_samples,
+            random_subset=config.random_subset,
+            seed=config.subset_seed
+        )
     
     # Load tokenizer
     tokenizer = BertTokenizer.from_pretrained(config.bert_model)
@@ -121,6 +163,26 @@ def load_conll_dataset(config):
     train_dataset = datasets["train"]
     eval_dataset = datasets["validation"]
     test_dataset = datasets["test"]
+
+    # Apply optional split limits for quick integrity checks.
+    train_dataset = _subset_split(
+        train_dataset,
+        max_samples=config.max_train_samples,
+        random_subset=config.random_subset,
+        seed=config.subset_seed
+    )
+    eval_dataset = _subset_split(
+        eval_dataset,
+        max_samples=config.max_eval_samples,
+        random_subset=config.random_subset,
+        seed=config.subset_seed
+    )
+    test_dataset = _subset_split(
+        test_dataset,
+        max_samples=config.max_test_samples,
+        random_subset=config.random_subset,
+        seed=config.subset_seed
+    )
     
     # Load tokenizer
     tokenizer = BertTokenizer.from_pretrained(config.bert_model)
@@ -208,10 +270,20 @@ def create_public_dataset(config, size=10000):
     
     if config.dataset_name == "glue":
         dataset = load_dataset("glue", config.task_name)
-        public_dataset = dataset["train"].select(range(min(size, len(dataset["train"]))))
+        public_dataset = _subset_split(
+            dataset["train"],
+            max_samples=size,
+            random_subset=config.random_subset,
+            seed=config.subset_seed
+        )
     elif config.dataset_name == "conll2003":
         dataset = load_dataset("conll2003")
-        public_dataset = dataset["train"].select(range(min(size, len(dataset["train"]))))
+        public_dataset = _subset_split(
+            dataset["train"],
+            max_samples=size,
+            random_subset=config.random_subset,
+            seed=config.subset_seed
+        )
     else:
         raise ValueError(f"Unsupported dataset: {config.dataset_name}")
     
