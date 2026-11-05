@@ -15,6 +15,17 @@ import os
 
 from utils import compute_metrics
 
+
+def _safe_get_spent_epsilon(privacy_engine, delta):
+    """Return spent epsilon when available; None if accountant cannot provide it yet."""
+    try:
+        spent = privacy_engine.accountant.get_epsilon(delta=delta)
+        if np.isfinite(spent):
+            return float(spent)
+    except (ValueError, FloatingPointError, OverflowError):
+        pass
+    return None
+
 def train_model_with_dpsgd(model, train_dataset, eval_dataset, config, device):
     """
     Fine-tune model with Differentially Private SGD (DP-SGD).
@@ -65,11 +76,9 @@ def train_model_with_dpsgd(model, train_dataset, eval_dataset, config, device):
             target_delta=config.delta,
             max_grad_norm=config.max_grad_norm,
         )
-        
-        # In Opacus 1.4.0 (PRVAccountant), use get_epsilon(delta) to query spent privacy.
-        spent_epsilon = privacy_engine.accountant.get_epsilon(delta=config.delta)
+
         print(f"Target privacy: ε={config.epsilon}, δ={config.delta}")
-        print(f"Initial accounted privacy (before training steps): ε={spent_epsilon:.4f}")
+        print("Initial accounted privacy will be reported after the first optimization step.")
     
     # Set up learning rate scheduler
     total_steps = len(train_loader) * config.num_epochs
@@ -119,6 +128,13 @@ def train_model_with_dpsgd(model, train_dataset, eval_dataset, config, device):
         
         avg_loss = epoch_loss / len(train_loader)
         print(f"Epoch {epoch+1} average loss: {avg_loss:.4f}")
+
+        if config.enable_dp:
+            spent_epsilon = _safe_get_spent_epsilon(privacy_engine, config.delta)
+            if spent_epsilon is not None:
+                print(f"Privacy spent after epoch {epoch+1}: ε={spent_epsilon:.4f}, δ={config.delta}")
+            else:
+                print(f"Privacy spent after epoch {epoch+1}: unavailable (accountant returned non-finite value)")
 
         # Save an epoch checkpoint before evaluation
         os.makedirs("models", exist_ok=True)
