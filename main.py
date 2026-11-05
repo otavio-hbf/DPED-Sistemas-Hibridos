@@ -3,6 +3,7 @@
 
 import os
 import argparse
+from datetime import datetime
 import torch
 from transformers import BertForSequenceClassification
 
@@ -159,6 +160,52 @@ def build_dp_compatible_model(model, config, device):
     return dp_model
 
 
+def save_results_summary(args, config, experiment_records):
+    """Persist a full experiment summary with parameters and key metrics."""
+    summary_dir = os.path.join("results", config.dataset_name)
+    os.makedirs(summary_dir, exist_ok=True)
+    summary_path = os.path.join(summary_dir, "results_summary.txt")
+
+    with open(summary_path, "a", encoding="utf-8") as f:
+        f.write("\n" + "=" * 100 + "\n")
+        f.write(f"Execution timestamp: {datetime.now().isoformat(timespec='seconds')}\n")
+        f.write(f"Dataset: {config.dataset_name}\n")
+        f.write(f"Task: {config.task_name}\n")
+        f.write("\nParameters used:\n")
+        for key, value in sorted(vars(args).items()):
+            f.write(f"- {key}: {value}\n")
+
+        f.write("\nMetrics by run:\n")
+        for i, record in enumerate(experiment_records, start=1):
+            metrics = record["metrics"]
+            accuracy = metrics.get("accuracy", float("nan"))
+            precision = metrics.get("precision", float("nan"))
+            recall = metrics.get("recall", float("nan"))
+            f1 = metrics.get("f1", float("nan"))
+
+            f.write(
+                f"Run {i}: method={record['method']}, epsilon={record['epsilon']}, "
+                f"enable_dp={record['enable_dp']}\n"
+            )
+            f.write(f"  Accuracy: {accuracy:.6f}\n")
+            f.write(f"  Precision: {precision:.6f}\n")
+            f.write(f"  Recall: {recall:.6f}\n")
+            f.write(f"  F1: {f1:.6f}\n")
+
+        f.write("=" * 100 + "\n")
+
+    print(f"Saved automatic summary to: {summary_path}")
+
+
+def is_dp_effectively_enabled(method, config):
+    """Return whether a method effectively runs DP during fine-tuning."""
+    if method == "non-private":
+        return False
+    if method == "dp-sgd":
+        return True
+    return config.enable_dp
+
+
 def run_method(method, train_dataset, eval_dataset, test_dataset, public_dataset, config, device):
     """
     Run a specific method for training with differential privacy.
@@ -297,6 +344,7 @@ def run_privacy_utility_tradeoff(train_dataset, eval_dataset, test_dataset, publ
     
     # Store metrics for each method and epsilon
     results = {method: [] for method in methods}
+    experiment_records = []
     
     # Run each method with each epsilon value
     for epsilon in epsilon_values:
@@ -315,6 +363,12 @@ def run_privacy_utility_tradeoff(train_dataset, eval_dataset, test_dataset, publ
                 if not results[method]:
                     _, metrics = run_method(method, train_dataset, eval_dataset, test_dataset, 
                                           public_dataset, config, device)
+                    experiment_records.append({
+                        "method": method,
+                        "epsilon": epsilon,
+                        "enable_dp": is_dp_effectively_enabled(method, config),
+                        "metrics": metrics,
+                    })
                     # Repeat the same metrics for all epsilon values
                     results[method] = [metrics] * len(epsilon_values)
                 continue
@@ -323,6 +377,12 @@ def run_privacy_utility_tradeoff(train_dataset, eval_dataset, test_dataset, publ
             _, metrics = run_method(method, train_dataset, eval_dataset, test_dataset, 
                                   public_dataset, config, device)
             results[method].append(metrics)
+            experiment_records.append({
+                "method": method,
+                "epsilon": epsilon,
+                "enable_dp": is_dp_effectively_enabled(method, config),
+                "metrics": metrics,
+            })
     
     # Extract primary metric values (accuracy or F1)
     primary_metric = "accuracy" if config.task_name in ["sst2", "mnli", "cola"] else "f1"
@@ -343,6 +403,8 @@ def run_privacy_utility_tradeoff(train_dataset, eval_dataset, test_dataset, publ
         
         for method in methods:
             f.write(f"{method}: " + ", ".join(f"{value:.4f}" for value in metric_values[method]) + "\n")
+
+    return experiment_records
 
 
 def main():
@@ -377,9 +439,10 @@ def main():
     print(f"Public dataset size: {len(public_dataset)}")
     
     # Run experiments
+    experiment_records = []
     if args.privacy_utility_tradeoff:
         # Run privacy-utility tradeoff experiment
-        run_privacy_utility_tradeoff(
+        experiment_records = run_privacy_utility_tradeoff(
             train_dataset, eval_dataset, test_dataset, public_dataset, config, device
         )
     elif args.run_all_methods:
@@ -392,6 +455,12 @@ def main():
                 method, train_dataset, eval_dataset, test_dataset, public_dataset, config, device
             )
             results[method] = metrics
+            experiment_records.append({
+                "method": method,
+                "epsilon": config.epsilon,
+                "enable_dp": is_dp_effectively_enabled(method, config),
+                "metrics": metrics,
+            })
         
         # Print comparison
         print("\nResults Summary:")
@@ -400,9 +469,18 @@ def main():
             print(f"{method}: {metrics}")
     else:
         # Run single method
-        run_method(
+        _, metrics = run_method(
             args.method, train_dataset, eval_dataset, test_dataset, public_dataset, config, device
         )
+        experiment_records.append({
+            "method": args.method,
+            "epsilon": config.epsilon,
+            "enable_dp": is_dp_effectively_enabled(args.method, config),
+            "metrics": metrics,
+        })
+
+    # Always save full summary at the end of execution.
+    save_results_summary(args, config, experiment_records)
 
 
 if __name__ == "__main__":
