@@ -13,6 +13,7 @@ from opacus.utils.batch_memory_manager import BatchMemoryManager
 import numpy as np
 import os
 import warnings
+import inspect
 
 from utils import compute_metrics
 
@@ -26,6 +27,70 @@ def _safe_get_spent_epsilon(privacy_engine, delta):
     except (ValueError, FloatingPointError, OverflowError):
         pass
     return None
+
+
+def _supports_position_ids(model):
+    """Return True when model.forward accepts position_ids."""
+    try:
+        return "position_ids" in inspect.signature(model.forward).parameters
+    except (TypeError, ValueError):
+        return False
+
+
+def _build_position_ids(input_ids):
+    """Build explicit position ids with the same batch size as input_ids."""
+    batch_size, seq_len = input_ids.shape[:2]
+    return torch.arange(seq_len, device=input_ids.device).unsqueeze(0).expand(batch_size, -1)
+
+
+def _forward_batch(model, batch, labels_key=None, supports_position_ids=False):
+    """Forward pass helper with optional explicit position_ids."""
+    forward_kwargs = {
+        "input_ids": batch["input_ids"],
+        "attention_mask": batch["attention_mask"],
+        "token_type_ids": batch["token_type_ids"] if "token_type_ids" in batch else None,
+    }
+
+    if supports_position_ids:
+        forward_kwargs["position_ids"] = _build_position_ids(batch["input_ids"])
+
+    if labels_key is not None:
+        forward_kwargs["labels"] = batch[labels_key]
+
+    return model(**forward_kwargs)
+
+
+def _print_grad_sample_diagnostics(model, actual_batch_size):
+    """Print per-parameter grad_sample metadata to debug Opacus batch-dimension mismatches."""
+    print("\n[DP-DIAG] grad_sample diagnostics")
+    print(f"[DP-DIAG] actual input batch size: {actual_batch_size}")
+
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+
+        grad_sample = getattr(param, "grad_sample", None)
+        param_shape = tuple(param.shape)
+
+        if grad_sample is None:
+            print(f"[DP-DIAG] {name}: param_shape={param_shape}, grad_sample=None")
+            continue
+
+        if isinstance(grad_sample, list):
+            sample_counts = [int(gs.shape[0]) for gs in grad_sample if gs.dim() > 0]
+            grad_shapes = [tuple(gs.shape) for gs in grad_sample]
+            print(
+                f"[DP-DIAG] {name}: param_shape={param_shape}, "
+                f"grad_sample_type=list, grad_sample_shapes={grad_shapes}, "
+                f"sample_counts={sample_counts}"
+            )
+        else:
+            sample_count = int(grad_sample.shape[0]) if grad_sample.dim() > 0 else 1
+            print(
+                f"[DP-DIAG] {name}: param_shape={param_shape}, "
+                f"grad_sample_shape={tuple(grad_sample.shape)}, "
+                f"sample_count={sample_count}"
+            )
 
 def train_model_with_dpsgd(model, train_dataset, eval_dataset, config, device):
     """
@@ -42,6 +107,7 @@ def train_model_with_dpsgd(model, train_dataset, eval_dataset, config, device):
         Trained model, best metrics
     """
     print("Starting fine-tuning with DP-SGD...")
+    supports_position_ids = _supports_position_ids(model)
     
     # Create dataloaders
     train_loader = DataLoader(
@@ -65,6 +131,9 @@ def train_model_with_dpsgd(model, train_dataset, eval_dataset, config, device):
     
     # Set up DP-SGD if enabled
     if config.enable_dp:
+        # Opacus strict validator requires training mode when wrapping the model.
+        model.train()
+
         # RDP accountant is more numerically stable for tiny fast-check runs.
         privacy_engine = PrivacyEngine(accountant="rdp")
 
@@ -127,18 +196,23 @@ def train_model_with_dpsgd(model, train_dataset, eval_dataset, config, device):
                 labels_key = 'label' if 'label' in batch else 'labels'
                 
                 # Forward pass
-                outputs = model(
-                    input_ids=batch['input_ids'],
-                    attention_mask=batch['attention_mask'],
-                    token_type_ids=batch['token_type_ids'] if 'token_type_ids' in batch else None,
-                    labels=batch[labels_key]
+                outputs = _forward_batch(
+                    model,
+                    batch,
+                    labels_key=labels_key,
+                    supports_position_ids=supports_position_ids
                 )
                 
                 loss = outputs[0] if isinstance(outputs, tuple) else outputs.loss
                 
                 # Backward pass and optimization
                 loss.backward()
-                optimizer.step()
+                try:
+                    optimizer.step()
+                except RuntimeError as exc:
+                    if "stack expects each tensor to be equal size" in str(exc):
+                        _print_grad_sample_diagnostics(model, actual_batch_size=batch['input_ids'].shape[0])
+                    raise
                 scheduler.step()
                 optimizer.zero_grad()
                 
@@ -192,6 +266,7 @@ def train_model_without_dp(model, train_dataset, eval_dataset, config, device):
         Trained model, best metrics
     """
     print("Starting standard fine-tuning (no DP)...")
+    supports_position_ids = _supports_position_ids(model)
     
     # Create dataloaders
     train_loader = DataLoader(
@@ -237,11 +312,11 @@ def train_model_without_dp(model, train_dataset, eval_dataset, config, device):
             labels_key = 'label' if 'label' in batch else 'labels'
             
             # Forward pass
-            outputs = model(
-                input_ids=batch['input_ids'],
-                attention_mask=batch['attention_mask'],
-                token_type_ids=batch['token_type_ids'] if 'token_type_ids' in batch else None,
-                labels=batch[labels_key]
+            outputs = _forward_batch(
+                model,
+                batch,
+                labels_key=labels_key,
+                supports_position_ids=supports_position_ids
             )
             
             loss = outputs[0] if isinstance(outputs, tuple) else outputs.loss
@@ -301,6 +376,7 @@ def evaluate_model(model, eval_loader, config, device):
     
     # Determine if we're doing token classification (NER) or sequence classification
     is_token_classification = config.dataset_name == "conll2003"
+    supports_position_ids = _supports_position_ids(model)
     
     with torch.no_grad():
         for batch in tqdm(eval_loader, desc="Evaluating"):
@@ -311,10 +387,10 @@ def evaluate_model(model, eval_loader, config, device):
             labels_key = 'label' if 'label' in batch else 'labels'
             
             # Forward pass
-            outputs = model(
-                input_ids=batch['input_ids'],
-                attention_mask=batch['attention_mask'],
-                token_type_ids=batch['token_type_ids'] if 'token_type_ids' in batch else None
+            outputs = _forward_batch(
+                model,
+                batch,
+                supports_position_ids=supports_position_ids
             )
             
             logits = outputs.logits if hasattr(outputs, "logits") else (outputs[1] if isinstance(outputs, tuple) else outputs)

@@ -1,0 +1,102 @@
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1793885992.513962   18981 cpu_feature_guard.cc:227] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 AVX512F FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1793885995.330248   18981 cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
+Using device: cuda
+Train dataset size: 32
+Eval dataset size: 32
+Test dataset size: 32
+Public dataset size: 32
+
+================================================================================
+Running method: dp-distill
+Task: sst2
+Epsilon: 8.0
+================================================================================
+Some weights of BertForSequenceClassification were not initialized from the model checkpoint at bert-base-uncased and are newly initialized: ['classifier.bias', 'classifier.weight']
+You should probably TRAIN this model on a down-stream task to be able to use it for predictions and inference.
+Some weights of BertForSequenceClassification were not initialized from the model checkpoint at bert-base-uncased and are newly initialized: ['classifier.bias', 'classifier.weight']
+You should probably TRAIN this model on a down-stream task to be able to use it for predictions and inference.
+Some weights of BertForSequenceClassification were not initialized from the model checkpoint at bert-base-uncased and are newly initialized: ['classifier.bias', 'classifier.weight']
+You should probably TRAIN this model on a down-stream task to be able to use it for predictions and inference.
+Some weights of BertForSequenceClassification were not initialized from the model checkpoint at bert-base-uncased and are newly initialized: ['classifier.bias', 'classifier.weight']
+You should probably TRAIN this model on a down-stream task to be able to use it for predictions and inference.
+Some weights of BertForSequenceClassification were not initialized from the model checkpoint at bert-base-uncased and are newly initialized: ['classifier.bias', 'classifier.weight']
+You should probably TRAIN this model on a down-stream task to be able to use it for predictions and inference.
+Initialized 5 teacher models.
+
+Training Teacher 1/5
+Teacher 1, Epoch 1: 100% 1/1 [00:00<00:00,  1.44it/s]
+Teacher 1, Epoch 1 average loss: 0.6866
+
+Training Teacher 2/5
+Teacher 2, Epoch 1: 100% 1/1 [00:00<00:00,  5.87it/s]
+Teacher 2, Epoch 1 average loss: 0.7658
+
+Training Teacher 3/5
+Teacher 3, Epoch 1: 100% 1/1 [00:00<00:00,  6.98it/s]
+Teacher 3, Epoch 1 average loss: 0.6945
+
+Training Teacher 4/5
+Teacher 4, Epoch 1: 100% 1/1 [00:00<00:00,  7.00it/s]
+Teacher 4, Epoch 1 average loss: 0.5710
+
+Training Teacher 5/5
+Teacher 5, Epoch 1: 100% 1/1 [00:00<00:00,  5.53it/s]
+Teacher 5, Epoch 1 average loss: 0.7150
+Starting the embedding distillation process...
+Counting token frequency: 100% 4/4 [00:01<00:00,  3.05it/s]
+Generating teacher embeddings: 100% 4/4 [00:05<00:00,  1.34s/it]
+Distillation Epoch 1: 100% 224/224 [00:02<00:00, 93.63it/s]
+Distillation Epoch 1 average loss: 0.8790
+Starting fine-tuning with DP-SGD...
+/usr/local/lib/python3.13/dist-packages/opacus/privacy_engine.py:142: UserWarning: Secure RNG turned off. This is perfectly fine for experimentation as it allows for much faster training performance, but remember to turn it on and retrain one last time before production with ``secure_mode`` turned on.
+  warnings.warn(
+/usr/local/lib/python3.13/dist-packages/opacus/accountants/analysis/rdp.py:332: UserWarning: Optimal order is the largest alpha. Please consider expanding the range of alphas to get a tighter privacy bound.
+  warnings.warn(
+/usr/local/lib/python3.13/dist-packages/opacus/accountants/analysis/prv/prvs.py:50: RuntimeWarning: invalid value encountered in log
+  z = np.log((np.exp(t) + q - 1) / q)
+/usr/local/lib/python3.13/dist-packages/opacus/grad_sample/functorch.py:23: FutureWarning: We've integrated functorch into PyTorch. As the final step of the integration, `functorch.make_functional` is deprecated as of PyTorch 2.0 and will be deleted in a future version of PyTorch >= 2.3. Please use `torch.func.functional_call` instead; see the PyTorch 2.0 release notes and/or the `torch.func` migration guide for more details https://pytorch.org/docs/main/func.migrating.html
+  flayer, _ = make_functional(layer)
+/usr/local/lib/python3.13/dist-packages/opacus/grad_sample/functorch.py:39: FutureWarning: We've integrated functorch into PyTorch. As the final step of the integration, `functorch.grad` is deprecated as of PyTorch 2.0 and will be deleted in a future version of PyTorch >= 2.3. Please use `torch.func.grad` instead; see the PyTorch 2.0 release notes and/or the `torch.func` migration guide for more details https://pytorch.org/docs/main/func.migrating.html
+  ft_compute_grad = grad(compute_loss_stateless_model)
+/usr/local/lib/python3.13/dist-packages/opacus/grad_sample/functorch.py:43: FutureWarning: We've integrated functorch into PyTorch. As the final step of the integration, `functorch.vmap` is deprecated as of PyTorch 2.0 and will be deleted in a future version of PyTorch >= 2.3. Please use `torch.vmap` instead; see the PyTorch 2.0 release notes and/or the `torch.func` migration guide for more details https://pytorch.org/docs/main/func.migrating.html
+  layer.ft_compute_sample_grad = vmap(ft_compute_grad, in_dims=(None, 0, 0))
+Target privacy: ε=8.0, δ=1e-05
+Initial accounted privacy will be reported after the first optimization step.
+Epoch 1:   0% 0/1 [00:00<?, ?it/s]/usr/local/lib/python3.13/dist-packages/torch/nn/modules/module.py:1870: FutureWarning: Using a non-full backward hook when the forward contains multiple autograd Nodes is deprecated and will be removed in future versions. This hook will be missing some grad_input. Please use register_full_backward_hook to get the documented behavior.
+  self._maybe_warn_non_full_backward_hook(args, result, grad_fn)
+/usr/local/lib/python3.13/dist-packages/torch/nn/modules/module.py:1870: FutureWarning: Using a non-full backward hook when outputs are generated by different autograd Nodes is deprecated and will be removed in future versions. This hook will be missing some grad_output. Please use register_full_backward_hook to get the documented behavior.
+  self._maybe_warn_non_full_backward_hook(args, result, grad_fn)
+Epoch 1:   0% 0/1 [00:00<?, ?it/s]
+Traceback (most recent call last):
+  File "/content/DPED-Sistemas-Hibridos/DPED-Sistemas-Hibridos/DPED-Sistemas-Hibridos/main.py", line 376, in <module>
+    main()
+    ~~~~^^
+  File "/content/DPED-Sistemas-Hibridos/DPED-Sistemas-Hibridos/DPED-Sistemas-Hibridos/main.py", line 370, in main
+    run_method(
+    ~~~~~~~~~~^
+        args.method, train_dataset, eval_dataset, test_dataset, public_dataset, config, device
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/content/DPED-Sistemas-Hibridos/DPED-Sistemas-Hibridos/DPED-Sistemas-Hibridos/main.py", line 224, in run_method
+    model, _ = train_model_with_dpsgd(model, train_dataset, eval_dataset, config, device)
+               ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/content/DPED-Sistemas-Hibridos/DPED-Sistemas-Hibridos/DPED-Sistemas-Hibridos/training.py", line 140, in train_model_with_dpsgd
+    optimizer.step()
+    ~~~~~~~~~~~~~~^^
+  File "/usr/local/lib/python3.13/dist-packages/torch/optim/lr_scheduler.py", line 166, in wrapper
+    return func.__get__(opt, opt.__class__)(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.13/dist-packages/opacus/optimizers/optimizer.py", line 513, in step
+    if self.pre_step():
+       ~~~~~~~~~~~~~^^
+  File "/usr/local/lib/python3.13/dist-packages/opacus/optimizers/optimizer.py", line 494, in pre_step
+    self.clip_and_accumulate()
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/usr/local/lib/python3.13/dist-packages/opacus/optimizers/optimizer.py", line 404, in clip_and_accumulate
+    per_sample_norms = torch.stack(per_param_norms, dim=1).norm(2, dim=1)
+                       ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: stack expects each tensor to be equal size, but got [8] at entry 0 and [1] at entry 1
