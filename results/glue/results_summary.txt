@@ -13,3 +13,89 @@ mnli Results:
 cola Results:
 --------------------------------------------------------------------------------
 
+
+====================================================================================================
+Execution timestamp: 2026-11-05T14:11:33
+Dataset: glue
+Task: sst2
+
+Parameters used:
+- batch_size: 8
+- bert_model: bert-base-uncased
+- dataset: glue
+- delta: 1e-05
+- embedding_noise_std: 0.1
+- epsilon: 8.0
+- intermediate_noise_std: 0.05
+- learning_rate: 2e-05
+- max_eval_samples: 8
+- max_public_samples: 8
+- max_seq_length: 128
+- max_test_samples: 8
+- max_train_samples: 8
+- method: non-private
+- no_dp: False
+- no_multi_layer_noise: False
+- num_epochs: 1
+- num_teachers: 5
+- privacy_utility_tradeoff: False
+- rare_token_noise_factor: 2.0
+- rare_token_threshold: 2
+- run_all_methods: False
+- seed: 42
+- subset_seed: 42
+- subset_strategy: random
+- task: sst2
+- teacher_noise: 0.5
+- weight_decay: 0.01
+
+Metrics by run:
+Run 1: method=non-private, epsilon=8.0, enable_dp=False
+  Accuracy: 0.750000
+  Precision: 0.750000
+  Recall: 1.000000
+  F1: 0.857143
+====================================================================================================
+
+====================================================================================================
+Execution timestamp: 2026-11-05T15:53:20
+Dataset: glue
+Task: sst2
+
+Parameters used:
+- batch_size: 8
+- bert_model: bert-base-uncased
+- dataset: glue
+- delta: 1e-05
+- embedding_noise_std: 0.1
+- epsilon: 8.0
+- intermediate_noise_std: 0.05
+- learning_rate: 2e-05
+- max_eval_samples: 8
+- max_public_samples: 8
+- max_seq_length: 128
+- max_test_samples: 8
+- max_train_samples: 8
+- method: non-private
+- no_dp: False
+- no_multi_layer_noise: False
+- num_epochs: 1
+- num_teachers: 5
+- privacy_utility_tradeoff: False
+- rare_token_noise_factor: 2.0
+- rare_token_threshold: 2
+- run_all_methods: False
+- seed: 42
+- subset_seed: 42
+- subset_strategy: random
+- task: sst2
+- teacher_noise: 0.5
+- weight_decay: 0.01
+
+Metrics by run:
+Run 1: method=non-private, epsilon=8.0, enable_dp=False
+  Accuracy: 0.750000
+  Precision: 0.750000
+  Recall: 1.000000
+  F1: 0.857143
+====================================================================================================

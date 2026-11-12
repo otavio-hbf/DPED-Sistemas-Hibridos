@@ -3,7 +3,9 @@
 
 import os
 import argparse
+import json
 from datetime import datetime
+import numpy as np
 import torch
 from transformers import BertForSequenceClassification
 
@@ -206,6 +208,117 @@ def is_dp_effectively_enabled(method, config):
     return config.enable_dp
 
 
+def _unwrap_model(model):
+    """Unwrap wrappers (e.g., Opacus/DP wrappers) to access the underlying model."""
+    current = model
+    while hasattr(current, "_module"):
+        current = current._module
+    return current
+
+
+def _extract_word_embeddings(model):
+    """Extract the token embedding matrix from BERT-based models."""
+    base_model = _unwrap_model(model)
+    if hasattr(base_model, "bert") and hasattr(base_model.bert, "embeddings"):
+        return base_model.bert.embeddings.word_embeddings.weight.detach().cpu()
+    raise ValueError("Could not find BERT word embeddings in model.")
+
+
+def _extract_split_labels(dataset):
+    """Extract labels from a split as a numpy array and return (label_key, labels)."""
+    if dataset is None or len(dataset) == 0:
+        return None, None
+
+    sample = dataset[0]
+    label_key = "label" if "label" in sample else ("labels" if "labels" in sample else None)
+    if label_key is None:
+        return None, None
+
+    labels = []
+    for i in range(len(dataset)):
+        value = dataset[i][label_key]
+        if isinstance(value, torch.Tensor):
+            value = value.detach().cpu().numpy()
+        labels.append(value)
+
+    return label_key, np.asarray(labels)
+
+
+def _extract_label_mapping(dataset, label_key):
+    """Return {id: name} mapping when dataset has ClassLabel metadata."""
+    if dataset is None or label_key is None:
+        return None
+    if not hasattr(dataset, "features") or label_key not in dataset.features:
+        return None
+
+    feature = dataset.features[label_key]
+    names = getattr(feature, "names", None)
+    if not names:
+        return None
+
+    return {str(i): name for i, name in enumerate(names)}
+
+
+def save_model_embeddings(model, config, method, train_dataset=None, eval_dataset=None, test_dataset=None):
+    """Save final token embeddings for a run in a folder named by dataset/method/epsilon."""
+    epsilon_tag = str(config.epsilon).replace(".", "p")
+    run_dir_name = f"{config.dataset_name}_{config.task_name}_{method}_eps{epsilon_tag}"
+    output_dir = os.path.join("results", "embeddings", run_dir_name)
+    os.makedirs(output_dir, exist_ok=True)
+
+    embeddings = _extract_word_embeddings(model)
+    embeddings_pt_path = os.path.join(output_dir, "token_embeddings.pt")
+    embeddings_npy_path = os.path.join(output_dir, "token_embeddings.npy")
+    metadata_path = os.path.join(output_dir, "metadata.txt")
+    label_map_path = os.path.join(output_dir, "label_id_to_name.json")
+
+    torch.save(embeddings, embeddings_pt_path)
+    np.save(embeddings_npy_path, embeddings.numpy())
+
+    split_info = {}
+    for split_name, split_dataset in [
+        ("train", train_dataset),
+        ("eval", eval_dataset),
+        ("test", test_dataset),
+    ]:
+        label_key, labels_array = _extract_split_labels(split_dataset)
+        if labels_array is None:
+            continue
+
+        labels_path = os.path.join(output_dir, f"{split_name}_labels.npy")
+        np.save(labels_path, labels_array)
+        split_info[split_name] = {
+            "label_key": label_key,
+            "shape": tuple(labels_array.shape),
+            "file": os.path.basename(labels_path),
+        }
+
+    label_mapping = _extract_label_mapping(test_dataset, "label")
+    if label_mapping is None:
+        label_mapping = _extract_label_mapping(test_dataset, "labels")
+    if label_mapping is not None:
+        with open(label_map_path, "w", encoding="utf-8") as f:
+            json.dump(label_mapping, f, ensure_ascii=True, indent=2)
+
+    with open(metadata_path, "w", encoding="utf-8") as f:
+        f.write(f"saved_at={datetime.now().isoformat(timespec='seconds')}\n")
+        f.write(f"dataset={config.dataset_name}\n")
+        f.write(f"task={config.task_name}\n")
+        f.write(f"method={method}\n")
+        f.write(f"epsilon={config.epsilon}\n")
+        f.write(f"shape={tuple(embeddings.shape)}\n")
+        f.write("files=token_embeddings.pt,token_embeddings.npy\n")
+        if split_info:
+            for split_name, info in split_info.items():
+                f.write(
+                    f"labels_{split_name}=key:{info['label_key']},shape:{info['shape']},file:{info['file']}\n"
+                )
+        if label_mapping is not None:
+            f.write(f"label_id_to_name_file={os.path.basename(label_map_path)}\n")
+
+    print(f"Saved model embeddings to: {output_dir}")
+
+
 def run_method(method, train_dataset, eval_dataset, test_dataset, public_dataset, config, device):
     """
     Run a specific method for training with differential privacy.
@@ -318,6 +431,16 @@ def run_method(method, train_dataset, eval_dataset, test_dataset, public_dataset
     for metric_name, value in test_metrics.items():
         print(f"{metric_name.capitalize()}: {value:.4f}")
     print(f"{'='*80}\n")
+
+    # Save final model embeddings for this method run.
+    save_model_embeddings(
+        model,
+        config,
+        method,
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
+        test_dataset=test_dataset,
+    )
     
     return model, test_metrics
 
