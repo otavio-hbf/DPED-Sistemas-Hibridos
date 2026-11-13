@@ -294,8 +294,7 @@ class TeacherEnsemble:
     
     def get_token_frequency(self, public_dataset):
         """
-        Count token frequency across teacher models.
-        Used for rare token detection.
+        Count in how many teacher datasets each public token appears.
         
         Args:
             public_dataset: The public/unlabeled dataset for distillation
@@ -303,32 +302,29 @@ class TeacherEnsemble:
         Returns:
             Dictionary mapping token IDs to their frequency across teachers
         """
-        from transformers import BertTokenizer
-        tokenizer = BertTokenizer.from_pretrained(self.config.bert_model)
-        token_counts = {}
-        
-        # Create dataloader for public dataset
+        public_token_ids = set()
         public_loader = DataLoader(
             public_dataset,
             batch_size=self.config.batch_size,
             shuffle=False
         )
-        
-        # Count tokens across teachers
         for batch in tqdm(public_loader, desc="Counting token frequency"):
-            input_ids = batch['input_ids'].to(self.device)
-            for token_id in input_ids.unique().cpu().numpy():
-                if token_id not in token_counts:
-                    token_counts[token_id] = 0
-                    
-                # Check how many teachers have seen this token
-                for teacher_dataset in self.teacher_datasets:
-                    teacher_loader = DataLoader(teacher_dataset, batch_size=16, shuffle=False)
-                    for teacher_batch in teacher_loader:
-                        if token_id in teacher_batch['input_ids'].unique():
-                            token_counts[token_id] += 1
-                            break
-                            
+            public_token_ids.update(
+                batch['input_ids'].detach().cpu().unique().tolist()
+            )
+
+        token_counts = dict.fromkeys(public_token_ids, 0)
+        for teacher_dataset in tqdm(self.teacher_datasets, desc="Counting teacher token presence"):
+            teacher_token_ids = set()
+            teacher_loader = DataLoader(teacher_dataset, batch_size=16, shuffle=False)
+            for batch in teacher_loader:
+                teacher_token_ids.update(
+                    batch['input_ids'].detach().cpu().unique().tolist()
+                )
+
+            for token_id in public_token_ids.intersection(teacher_token_ids):
+                token_counts[token_id] += 1
+
         return token_counts
     
     def generate_embeddings(self, public_dataset, student_model):

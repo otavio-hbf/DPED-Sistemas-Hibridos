@@ -22,7 +22,7 @@ Assim, os mesmos conjuntos dos professores podem ser percorridos repetidamente p
 
 Apesar do nome `token frequency`, o valor atual nao e a frequencia de ocorrencias do token. Ele representa em quantos conjuntos de professores o token aparece pelo menos uma vez. Com o limite padrao de raridade igual a 2, um token e considerado raro quando aparece em menos de dois conjuntos.
 
-A otimizacao deve manter esse significado, os valores resultantes por token e o uso desses valores em `generate_embeddings()`. Mudar para contagem total de ocorrencias ou desativar a etapa seria uma alteracao metodologica e fica fora deste plano.
+A otimizacao deve manter esse significado e o uso desses valores em `generate_embeddings()`. Na validacao foi identificado que a implementacao anterior podia incrementar o mesmo token mais de uma vez por professor quando ele aparecia em lotes publicos diferentes. Essa duplicacao nao representa a presenca por conjunto de professor; a contagem otimizada corrige esse caso e pode, portanto, alterar tais valores numericos. Mudar para contagem total de ocorrencias ou desativar a etapa seria uma alteracao metodologica e fica fora deste plano.
 
 ## Plano de execucao
 
@@ -49,7 +49,7 @@ Isso substitui as buscas repetidas por uma passagem pelos dados de cada professo
 
 ### 4. Validar equivalencia e desempenho
 
-- Comparar a contagem antiga e a nova token a token em um conjunto pequeno e reproduzivel; exigir igualdade de chaves e valores.
+- Comparar a contagem antiga e a nova token a token em um conjunto pequeno e reproduzivel; verificar a igualdade quando nao ha repeticao entre lotes publicos e confirmar que repeticoes entre lotes deixam de inflar a presenca por professor.
 - Executar o fluxo `dp-distill` com subconjuntos pequenos e confirmar que a distilacao e o fine-tuning continuam funcionando.
 - Medir novamente a etapa isoladamente e a execucao completa, no mesmo ambiente e com os mesmos dados e parametros.
 - Registrar o ganho observado e confirmar que a etapa de contagem nao realiza operacoes na GPU.
@@ -64,6 +64,14 @@ Os conjuntos de professores sao particionados a partir dos dados de treino. As c
 - Alterar o limite de raridade ou a definicao de token raro.
 - Trocar presenca por professor por frequencia total de ocorrencias.
 - Alterar a agregacao dos embeddings, o ruido ou os demais mecanismos de privacidade.
+
+## Resultado da implementacao
+
+`TeacherEnsemble.get_token_frequency()` agora coleta os tokens publicos uma vez e percorre cada conjunto de professor uma vez, acumulando presenca em conjuntos na CPU. O resultado continua restrito aos tokens publicos, com uma unidade por conjunto de professor; a inicializacao do tokenizer nao utilizado foi removida.
+
+O teste deterministico `tests/test_token_frequency.py` confirma a presenca por professor, repeticoes dentro de um professor sem incremento adicional, e a correcao do sobrecontador entre lotes publicos. Tambem verifica que a funcao nao chama `.to()` para transferir tensores ao dispositivo de treino. A suite de testes foi executada no ambiente `.venv`.
+
+A medicao representativa e a execucao end-to-end de `dp-distill` ainda precisam ser feitas com os mesmos dados e parametros do experimento; os testes unitarios nao permitem afirmar um ganho de tempo nem validar o fluxo completo.
 
 ## Referencias no codigo
 
