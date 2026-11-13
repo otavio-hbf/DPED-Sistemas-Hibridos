@@ -1,0 +1,56 @@
+Distillation Epoch 1 average loss: 0.3625
+Some weights of BertForSequenceClassification were not initialized from the model checkpoint at bert-base-uncased and are newly initialized: ['classifier.bias', 'classifier.weight']
+You should probably TRAIN this model on a down-stream task to be able to use it for predictions and inference.
+Starting fine-tuning with DP-SGD...
+/usr/local/lib/python3.13/dist-packages/opacus/privacy_engine.py:142: UserWarning: Secure RNG turned off. This is perfectly fine for experimentation as it allows for much faster training performance, but remember to turn it on and retrain one last time before production with ``secure_mode`` turned on.
+  warnings.warn(
+/usr/local/lib/python3.13/dist-packages/opacus/accountants/analysis/rdp.py:332: UserWarning: Optimal order is the largest alpha. Please consider expanding the range of alphas to get a tighter privacy bound.
+  warnings.warn(
+/usr/local/lib/python3.13/dist-packages/opacus/grad_sample/functorch.py:23: FutureWarning: We've integrated functorch into PyTorch. As the final step of the integration, `functorch.make_functional` is deprecated as of PyTorch 2.0 and will be deleted in a future version of PyTorch >= 2.3. Please use `torch.func.functional_call` instead; see the PyTorch 2.0 release notes and/or the `torch.func` migration guide for more details https://pytorch.org/docs/main/func.migrating.html
+  flayer, _ = make_functional(layer)
+/usr/local/lib/python3.13/dist-packages/opacus/grad_sample/functorch.py:39: FutureWarning: We've integrated functorch into PyTorch. As the final step of the integration, `functorch.grad` is deprecated as of PyTorch 2.0 and will be deleted in a future version of PyTorch >= 2.3. Please use `torch.func.grad` instead; see the PyTorch 2.0 release notes and/or the `torch.func` migration guide for more details https://pytorch.org/docs/main/func.migrating.html
+  ft_compute_grad = grad(compute_loss_stateless_model)
+/usr/local/lib/python3.13/dist-packages/opacus/grad_sample/functorch.py:43: FutureWarning: We've integrated functorch into PyTorch. As the final step of the integration, `functorch.vmap` is deprecated as of PyTorch 2.0 and will be deleted in a future version of PyTorch >= 2.3. Please use `torch.vmap` instead; see the PyTorch 2.0 release notes and/or the `torch.func` migration guide for more details https://pytorch.org/docs/main/func.migrating.html
+  layer.ft_compute_sample_grad = vmap(ft_compute_grad, in_dims=(None, 0, 0))
+Target privacy: ε=8.0, δ=1e-05 (accountant=rdp)
+Initial accounted privacy will be reported after the first optimization step.
+Epoch 1:   0% 0/200 [00:00<?, ?it/s]/usr/local/lib/python3.13/dist-packages/torch/nn/modules/module.py:1874: FutureWarning: Using a non-full backward hook when the forward contains multiple autograd Nodes is deprecated and will be removed in future versions. This hook will be missing some grad_input. Please use register_full_backward_hook to get the documented behavior.
+  self._maybe_warn_non_full_backward_hook(args, result, grad_fn)
+/usr/local/lib/python3.13/dist-packages/torch/nn/modules/module.py:1874: FutureWarning: Using non-full backward hooks on a Module that does not return a single Tensor or a tuple of Tensors is deprecated and will be removed in future versions. This hook will be missing some of the grad_output. Please use register_full_backward_hook to get the documented behavior.
+  self._maybe_warn_non_full_backward_hook(args, result, grad_fn)
+Epoch 1:   0% 1/200 [00:04<15:36,  4.71s/it]/usr/local/lib/python3.13/dist-packages/torch/nn/modules/module.py:1874: FutureWarning: Using a non-full backward hook when the forward contains multiple autograd Nodes is deprecated and will be removed in future versions. This hook will be missing some grad_input. Please use register_full_backward_hook to get the documented behavior.
+  self._maybe_warn_non_full_backward_hook(args, result, grad_fn)
+/usr/local/lib/python3.13/dist-packages/torch/nn/modules/module.py:1874: FutureWarning: Using non-full backward hooks on a Module that does not return a single Tensor or a tuple of Tensors is deprecated and will be removed in future versions. This hook will be missing some of the grad_output. Please use register_full_backward_hook to get the documented behavior.
+  self._maybe_warn_non_full_backward_hook(args, result, grad_fn)
+Epoch 1:   1% 2/200 [00:05<08:16,  2.51s/it]
+Traceback (most recent call last):
+  File "/content/DPED-Sistemas-Hibridos/main.py", line 610, in <module>
+    main()
+    ~~~~^^
+  File "/content/DPED-Sistemas-Hibridos/main.py", line 595, in main
+    _, metrics = run_method(
+                 ~~~~~~~~~~^
+        args.method, train_dataset, eval_dataset, test_dataset, public_dataset, config, device
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/content/DPED-Sistemas-Hibridos/main.py", line 415, in run_method
+    model, _ = train_model_with_dpsgd(model, train_dataset, eval_dataset, config, device)
+               ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/content/DPED-Sistemas-Hibridos/training.py", line 191, in train_model_with_dpsgd
+    for batch in tqdm(memory_safe_data_loader, desc=f"Epoch {epoch+1}"):
+                 ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.13/dist-packages/tqdm/std.py", line 1181, in __iter__
+    for obj in iterable:
+               ^^^^^^^^
+  File "/usr/local/lib/python3.13/dist-packages/torch/utils/data/dataloader.py", line 725, in __next__
+    data = self._next_data()
+  File "/usr/local/lib/python3.13/dist-packages/torch/utils/data/dataloader.py", line 785, in _next_data
+    data = self._dataset_fetcher.fetch(index)  # may raise StopIteration
+  File "/usr/local/lib/python3.13/dist-packages/torch/utils/data/_utils/fetch.py", line 57, in fetch
+    return self.collate_fn(data)
+           ~~~~~~~~~~~~~~~^^^^^^
+  File "/usr/local/lib/python3.13/dist-packages/opacus/data_loader.py", line 56, in collate
+    torch.zeros(shape, dtype=dtype)
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+TypeError: zeros(): argument 'dtype' must be torch.dtype, not type

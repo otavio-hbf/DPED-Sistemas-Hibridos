@@ -14,8 +14,37 @@ import numpy as np
 import os
 import warnings
 import inspect
+from collections.abc import Mapping
 
 from utils import compute_metrics
+
+
+class _OpacusCompatibleDataset(torch.utils.data.Dataset):
+    """Expose mapping-based samples as tuples for Opacus empty-batch handling."""
+
+    def __init__(self, dataset):
+        sample = dataset[0]
+        if not isinstance(sample, Mapping):
+            raise TypeError("DP training expects dataset samples to be mappings.")
+
+        self.dataset = dataset
+        self.keys = tuple(sample.keys())
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, index):
+        sample = self.dataset[index]
+        return tuple(sample[key] for key in self.keys)
+
+
+def _restore_opacus_batch(batch, keys):
+    """Restore mapping keys after Opacus collates a tuple-based dataset."""
+    if isinstance(batch, Mapping):
+        return batch
+    if not isinstance(batch, (list, tuple)) or len(batch) != len(keys):
+        raise TypeError("Opacus returned a batch that does not match the dataset fields.")
+    return dict(zip(keys, batch))
 
 
 def _safe_get_spent_epsilon(privacy_engine, delta):
@@ -109,9 +138,15 @@ def train_model_with_dpsgd(model, train_dataset, eval_dataset, config, device):
     print("Starting fine-tuning with DP-SGD...")
     supports_position_ids = _supports_position_ids(model)
     
+    # Opacus 1.4 infers empty-batch dtypes by iterating dataset[0], so provide
+    # tuple samples instead of Hugging Face's mapping samples during DP training.
+    dp_dataset = _OpacusCompatibleDataset(train_dataset) if config.enable_dp else None
+    dp_batch_keys = dp_dataset.keys if dp_dataset is not None else None
+    loader_dataset = dp_dataset if dp_dataset is not None else train_dataset
+
     # Create dataloaders
     train_loader = DataLoader(
-        train_dataset,
+        loader_dataset,
         batch_size=config.batch_size,
         shuffle=True
     )
@@ -189,6 +224,9 @@ def train_model_with_dpsgd(model, train_dataset, eval_dataset, config, device):
             optimizer=optimizer
         ) as memory_safe_data_loader:
             for batch in tqdm(memory_safe_data_loader, desc=f"Epoch {epoch+1}"):
+                if dp_batch_keys is not None:
+                    batch = _restore_opacus_batch(batch, dp_batch_keys)
+
                 # Move batch to device
                 batch = {k: v.to(device) for k, v in batch.items() if k != 'idx'}
                 
