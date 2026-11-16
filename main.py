@@ -93,6 +93,9 @@ def parse_args():
                         help="Run all methods for comparison")
     parser.add_argument("--privacy_utility_tradeoff", action="store_true",
                         help="Run privacy-utility tradeoff experiment")
+    parser.add_argument("--skip_downstream", action="store_true",
+                        help="dp-distill only: stop after distillation and the pre-downstream export "
+                             "(no DP-SGD fine-tuning, no test, no post-downstream export)")
     
     return parser.parse_args()
 
@@ -137,6 +140,7 @@ def update_config_from_args(config, args):
     config.max_public_samples = args.max_public_samples
     config.random_subset = args.subset_strategy == "random"
     config.subset_seed = args.subset_seed
+    config.skip_downstream = args.skip_downstream
     
     return config
 
@@ -226,7 +230,7 @@ def _extract_word_embeddings(model):
 
 def _embedding_run_dir(config, method):
     epsilon_tag = str(config.epsilon).replace(".", "p")
-    run_dir_name = f"{config.dataset_name}_{config.task_name}_{method}_eps{epsilon_tag}"
+        run_dir_name = f"{config.dataset_name}_{config.task_name}_{method}_eps{epsilon_tag}"
     return os.path.join("results", "embeddings", run_dir_name)
 
 
@@ -456,6 +460,10 @@ def run_method(method, train_dataset, eval_dataset, test_dataset, public_dataset
             token_counts=teacher_ensemble.get_token_frequency(public_dataset),
         )
 
+        if getattr(config, "skip_downstream", False):
+            print("skip_downstream: pre-downstream export saved; skipping downstream task.")
+            return model, {}
+
         # Switch to Opacus-friendly classifier before DP-SGD.
         model = build_dp_compatible_model(model, config, device)
         
@@ -582,6 +590,8 @@ def run_privacy_utility_tradeoff(train_dataset, eval_dataset, test_dataset, publ
 def main():
     """Main function to run experiments"""
     args = parse_args()
+    if args.skip_downstream and (args.method != "dp-distill" or args.run_all_methods or args.privacy_utility_tradeoff):
+        raise SystemExit("--skip_downstream is only supported with --method dp-distill (single run).")
     
     # Set random seed
     set_seed(args.seed)

@@ -5,7 +5,8 @@ Arquivo: [attack_algen_dped.ipynb](../../notebooks/attack_algen_dped.ipynb)
 Sequência de execução no Colab, no padrão de [dped_medium.ipynb](../../notebooks/dped_medium.ipynb):
 
 1. **Montagem do Drive e clone do repositório.** `git pull` se o repositório já existir, senão `git clone`. Depois `pip install -r requirements.txt`.
-2. **Re-export DPED (ε 8, 4, 2, 1).** Mesmos comandos `!python main.py --method dp-distill ...` do `dped_medium.ipynb`. Esse re-export grava `token_freq.npy`, exigido pelo atacante (opção c da máscara de X). Saída: `results/embeddings/glue_sst2_dp-distill_eps<tag>/dped_student_pre_downstream/`.
+2. **Export pré-downstream com `--skip_downstream`.** Os comandos de export pulam a task downstream (DP-SGD, teste e export pós-downstream). O atacante só usa o export pré-downstream, então o treino downstream não é necessário. O re-export grava `token_freq.npy`, necessário ao atacante na opção (c) da máscara de X.
+
 3. **Smoke test.** `attacker_dped_sentence.py` com 10 amostras de treino e 10 de teste. Valida o checkpoint, o export e a escrita dos CSVs.
 4. **Grade de ataque.**
    - DPED: ε × `train_samples` ∈ {1, 10, 30, 100, 300, 500, 1000} × ridge. Saída em `results/attack/dped_eps<tag>/n<N>_r<R>/`.

@@ -34,6 +34,10 @@ results/embeddings/glue_sst2_dp-distill_eps8p0/dped_student_pre_downstream/
 
 O export legado no diretorio da execucao continua sendo gravado depois do treinamento downstream. Ele representa o estado final do modelo; seus arquivos de labels por split continuam representando classes da tarefa e nao devem ser usados como labels lexicais para estes vetores.
 
+### Execucao sem task downstream (`--skip_downstream`)
+
+Com `--skip_downstream` (somente `--method dp-distill`, execucao unica), `run_method()` retorna logo apos o export pré-downstream. Nao ha fine-tuning DP-SGD, teste nem export pos-downstream. O treino que gera os vetores (teachers e destilacao) roda por completo. Metricas de utilidade ficam vazias (`{}`) e o resumo em `results/<dataset>/results_summary.txt` as registra como `nan`. Combinar a flag com `--run_all_methods` ou `--privacy_utility_tradeoff` gera erro.
+
 ## Validacao
 
 O teste `tests/test_embedding_export.py` verifica que:
