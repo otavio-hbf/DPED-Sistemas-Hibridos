@@ -264,7 +264,8 @@ class DecoderInference:
         best_entry = self.best_models[0]
         self.best_val_loss = best_entry[0]
         best_checkpoint_path = best_entry[-1]
-        checkpoint = torch.load(best_checkpoint_path, map_location=self.device)
+        # weights_only=False: the checkpoint stores numpy scalars in val_results, which torch>=2.6 rejects by default. The file is produced by our own training run.
+        checkpoint = torch.load(best_checkpoint_path, map_location=self.device, weights_only=False)
         self.trainer.model.load_state_dict(checkpoint["model_state_dict"])
         self.trainer.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 

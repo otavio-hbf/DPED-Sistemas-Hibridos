@@ -24,7 +24,8 @@ Plano de referência: [plano-ataque-algen-dped.md](../analises/plano-ataque-alge
 - `--export_dir`: pasta de um export DPED com `token_ids.npy`, `token_embeddings.npy` e `token_freq.npy`. O `token_freq.npy` só existe após re-exportar DPED com a alteração de `main.py`.
 - `--checkpoint_path`: pasta do checkpoint do decoder ALGEN (carregado do Drive).
   - `load_best_model` (em `attacker_gt.py`) lê `training_args_and_best_models.json`. Cada entrada de `best_models` é `(val_loss, val_results, caminho)`, e o caminho do checkpoint é sempre o último item. Antes, o código escolhia o formato pelo texto de `checkpoint_path` (procurava `"yiyic"`). No Colab o caminho é `/content/drive/.../checkpoint`, então o ramo errado era usado e o erro `too many values to unpack` aparecia. Agora o código lê `best_entry[0]` e `best_entry[-1]`, o que funciona para qualquer tamanho de tupla.
-
+    - O caminho gravado no JSON é absoluto e pode ficar desatualizado se o checkpoint for renomeado no Drive (ex.: `checkpoint_epoch_100.pt` no JSON, `checkpoint_epoch_99.pt` no disco). Nesse caso, ajuste o nome no JSON ou no arquivo.
+    - `torch.load` usa `weights_only=False`. O checkpoint guarda escalares numpy em `val_results`, e o `weights_only=True` padrão do torch>=2.6 rejeita esse tipo. O arquivo vem do próprio treino, então é confiável.
 ## Saídas
 
 Em `--output_dir`:
