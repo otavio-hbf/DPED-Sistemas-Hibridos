@@ -7,7 +7,7 @@ import json
 from datetime import datetime
 import numpy as np
 import torch
-from transformers import BertForSequenceClassification
+from transformers import BertForSequenceClassification, BertTokenizer
 
 # Import our modules
 from config import Config
@@ -224,6 +224,46 @@ def _extract_word_embeddings(model):
     raise ValueError("Could not find BERT word embeddings in model.")
 
 
+def _embedding_run_dir(config, method):
+    epsilon_tag = str(config.epsilon).replace(".", "p")
+    run_dir_name = f"{config.dataset_name}_{config.task_name}_{method}_eps{epsilon_tag}"
+    return os.path.join("results", "embeddings", run_dir_name)
+
+
+def save_dped_student_embeddings(model, tokenizer, public_dataset, output_dir):
+    """Save DPED-distilled student vectors with the corresponding BERT tokens."""
+    token_ids = set()
+    for index in range(len(public_dataset)):
+        input_ids = public_dataset[index]["input_ids"]
+        if isinstance(input_ids, torch.Tensor):
+            input_ids = input_ids.detach().cpu().reshape(-1).tolist()
+        token_ids.update(int(token_id) for token_id in input_ids if int(token_id) != 0)
+
+    token_ids = sorted(token_ids)
+    if not token_ids:
+        raise ValueError("Cannot save DPED embeddings: no non-padding public tokens found.")
+
+    token_labels = tokenizer.convert_ids_to_tokens(token_ids)
+    if len(token_labels) != len(token_ids):
+        raise ValueError("Tokenizer returned a different number of labels than token IDs.")
+
+    embeddings = _extract_word_embeddings(model)[torch.tensor(token_ids, dtype=torch.long)]
+    os.makedirs(output_dir, exist_ok=True)
+
+    torch.save(embeddings, os.path.join(output_dir, "token_embeddings.pt"))
+    np.save(os.path.join(output_dir, "token_embeddings.npy"), embeddings.numpy())
+    np.save(os.path.join(output_dir, "token_ids.npy"), np.asarray(token_ids, dtype=np.int64))
+    with open(os.path.join(output_dir, "token_labels.json"), "w", encoding="utf-8") as f:
+        json.dump(token_labels, f, ensure_ascii=True, indent=2)
+
+    with open(os.path.join(output_dir, "metadata.txt"), "w", encoding="utf-8") as f:
+        f.write("stage=after_dped_distillation_before_downstream_finetuning\n")
+        f.write("representation=student_word_embedding_lookup\n")
+        f.write(f"shape={tuple(embeddings.shape)}\n")
+        f.write("row_alignment=token_ids.npy and token_labels.json\n")
+        f.write("files=token_embeddings.pt,token_embeddings.npy,token_ids.npy,token_labels.json\n")
+
+
 def _extract_split_labels(dataset):
     """Extract labels from a split as a numpy array and return (label_key, labels)."""
     if dataset is None or len(dataset) == 0:
@@ -261,9 +301,7 @@ def _extract_label_mapping(dataset, label_key):
 
 def save_model_embeddings(model, config, method, train_dataset=None, eval_dataset=None, test_dataset=None):
     """Save final token embeddings for a run in a folder named by dataset/method/epsilon."""
-    epsilon_tag = str(config.epsilon).replace(".", "p")
-    run_dir_name = f"{config.dataset_name}_{config.task_name}_{method}_eps{epsilon_tag}"
-    output_dir = os.path.join("results", "embeddings", run_dir_name)
+    output_dir = _embedding_run_dir(config, method)
     os.makedirs(output_dir, exist_ok=True)
 
     embeddings = _extract_word_embeddings(model)
@@ -406,6 +444,13 @@ def run_method(method, train_dataset, eval_dataset, test_dataset, public_dataset
         
         # First distill embeddings
         model = distill_embeddings(teacher_ensemble, model, public_dataset, config, device)
+        tokenizer = BertTokenizer.from_pretrained(config.bert_model)
+        save_dped_student_embeddings(
+            model,
+            tokenizer,
+            public_dataset,
+            os.path.join(_embedding_run_dir(config, method), "dped_student_pre_downstream"),
+        )
 
         # Switch to Opacus-friendly classifier before DP-SGD.
         model = build_dp_compatible_model(model, config, device)

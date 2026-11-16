@@ -71,4 +71,6 @@ results/
 data/
 datasets/
 
+#algen
+algen/SIH-ALGEN-main/outputs    
 .github/

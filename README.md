@@ -172,6 +172,15 @@ The framework achieves significantly improved privacy-utility trade-offs:
 Results will be saved in:
 - Model checkpoints: `models/best_model_*`
 - Privacy-utility plots: `privacy_utility_tradeoff_*.png`
+- Embedding artifacts: `results/embeddings/<dataset>_<task>_<method>_eps<epsilon>/`
+
+For `dp-distill`, `dped_student_pre_downstream/` contains the Student's word-lookup
+vectors immediately after DPED distillation and before downstream fine-tuning.
+`token_embeddings.npy` rows align with `token_ids.npy` and `token_labels.json`;
+labels are BERT tokens (including WordPiece fragments and special tokens), and
+padding is excluded. The run-directory-level embedding export remains the final
+model state after downstream training; its split label files contain task labels,
+not token labels.
 
 ## Troubleshooting
 
