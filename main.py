@@ -230,8 +230,8 @@ def _embedding_run_dir(config, method):
     return os.path.join("results", "embeddings", run_dir_name)
 
 
-def save_dped_student_embeddings(model, tokenizer, public_dataset, output_dir):
-    """Save DPED-distilled student vectors with the corresponding BERT tokens."""
+def save_dped_student_embeddings(model, tokenizer, public_dataset, output_dir, token_counts=None):
+    """Save DPED-distilled student vectors with the corresponding BERT tokens and teacher frequencies."""
     token_ids = set()
     for index in range(len(public_dataset)):
         input_ids = public_dataset[index]["input_ids"]
@@ -253,6 +253,9 @@ def save_dped_student_embeddings(model, tokenizer, public_dataset, output_dir):
     torch.save(embeddings, os.path.join(output_dir, "token_embeddings.pt"))
     np.save(os.path.join(output_dir, "token_embeddings.npy"), embeddings.numpy())
     np.save(os.path.join(output_dir, "token_ids.npy"), np.asarray(token_ids, dtype=np.int64))
+    if token_counts is not None:
+        token_freq = [int(token_counts.get(token_id, 0)) for token_id in token_ids]
+        np.save(os.path.join(output_dir, "token_freq.npy"), np.asarray(token_freq, dtype=np.int64))
     with open(os.path.join(output_dir, "token_labels.json"), "w", encoding="utf-8") as f:
         json.dump(token_labels, f, ensure_ascii=True, indent=2)
 
@@ -450,6 +453,7 @@ def run_method(method, train_dataset, eval_dataset, test_dataset, public_dataset
             tokenizer,
             public_dataset,
             os.path.join(_embedding_run_dir(config, method), "dped_student_pre_downstream"),
+            token_counts=teacher_ensemble.get_token_frequency(public_dataset),
         )
 
         # Switch to Opacus-friendly classifier before DP-SGD.

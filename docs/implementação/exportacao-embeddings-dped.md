@@ -29,6 +29,7 @@ results/embeddings/glue_sst2_dp-distill_eps8p0/dped_student_pre_downstream/
 | `token_embeddings.pt` | A mesma matriz em formato PyTorch. |
 | `token_ids.npy` | IDs de token em ordem crescente, usados para selecionar as linhas da matriz completa. |
 | `token_labels.json` | Tokens BERT em ordem correspondente a `token_ids.npy` e as linhas de `token_embeddings`. |
+| `token_freq.npy` | Número de professores cujo conjunto de dados contém cada token, na mesma ordem de `token_ids.npy`. Tokens com valor 0 têm linha não destilada (pré-treinada). Gravado apenas quando `save_dped_student_embeddings` recebe `token_counts` (executado em `dp-distill`). |
 | `metadata.txt` | Etapa do pipeline, tipo de representacao, shape e regra de alinhamento. |
 
 O export legado no diretorio da execucao continua sendo gravado depois do treinamento downstream. Ele representa o estado final do modelo; seus arquivos de labels por split continuam representando classes da tarefa e nao devem ser usados como labels lexicais para estes vetores.
