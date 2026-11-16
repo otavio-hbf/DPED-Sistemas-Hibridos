@@ -47,6 +47,20 @@ def _restore_opacus_batch(batch, keys):
     return dict(zip(keys, batch))
 
 
+def _set_empty_grad_samples(model):
+    """Prepare an empty DP batch so the optimizer still adds noise and accounts for it."""
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+        if not hasattr(param, "grad_sample"):
+            raise RuntimeError(
+                f"Trainable parameter {name} is missing Opacus grad_sample metadata."
+            )
+        param.grad_sample = torch.empty(
+            (0, *param.shape), device=param.device, dtype=param.dtype
+        )
+
+
 def _safe_get_spent_epsilon(privacy_engine, delta):
     """Return spent epsilon when available; None if accountant cannot provide it yet."""
     try:
@@ -217,6 +231,7 @@ def train_model_with_dpsgd(model, train_dataset, eval_dataset, config, device):
         # Training
         model.train()
         epoch_loss = 0
+        loss_batches = 0
         
         with BatchMemoryManager(
             data_loader=train_loader,
@@ -229,6 +244,13 @@ def train_model_with_dpsgd(model, train_dataset, eval_dataset, config, device):
 
                 # Move batch to device
                 batch = {k: v.to(device) for k, v in batch.items() if k != 'idx'}
+
+                if dp_batch_keys is not None and batch["input_ids"].shape[0] == 0:
+                    _set_empty_grad_samples(model)
+                    optimizer.step()
+                    scheduler.step()
+                    optimizer.zero_grad()
+                    continue
                 
                 # Labels key may be 'label' or 'labels' depending on the dataset
                 labels_key = 'label' if 'label' in batch else 'labels'
@@ -255,8 +277,11 @@ def train_model_with_dpsgd(model, train_dataset, eval_dataset, config, device):
                 optimizer.zero_grad()
                 
                 epoch_loss += loss.item()
+                loss_batches += 1
         
-        avg_loss = epoch_loss / len(train_loader)
+        if loss_batches == 0:
+            raise RuntimeError("DP-SGD epoch contained no non-empty batches.")
+        avg_loss = epoch_loss / loss_batches
         print(f"Epoch {epoch+1} average loss: {avg_loss:.4f}")
 
         if config.enable_dp:

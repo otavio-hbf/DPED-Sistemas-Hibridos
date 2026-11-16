@@ -1,10 +1,16 @@
 import unittest
 
 import torch
+from opacus import PrivacyEngine
 from opacus.data_loader import DPDataLoader
-from torch.utils.data import DataLoader, Dataset
+from torch.optim import SGD
+from torch.utils.data import DataLoader, Dataset, TensorDataset
 
-from training import _OpacusCompatibleDataset, _restore_opacus_batch
+from training import (
+    _OpacusCompatibleDataset,
+    _restore_opacus_batch,
+    _set_empty_grad_samples,
+)
 
 
 class _MappingDataset(Dataset):
@@ -39,6 +45,30 @@ class OpacusDataLoaderTests(unittest.TestCase):
 
         self.assertEqual(tuple(batch["input_ids"].shape), (2, 3))
         self.assertEqual(tuple(batch["label"].shape), (2,))
+
+    def test_empty_batch_runs_noisy_dp_step_and_updates_accountant(self):
+        model = torch.nn.Linear(2, 2)
+        model.train()
+        data = TensorDataset(torch.randn(4, 2), torch.zeros(4, dtype=torch.long))
+        loader = DataLoader(data, batch_size=2)
+        optimizer = SGD(model.parameters(), lr=0.1)
+        privacy_engine = PrivacyEngine(accountant="rdp")
+        model, optimizer, _ = privacy_engine.make_private_with_epsilon(
+            module=model,
+            optimizer=optimizer,
+            data_loader=loader,
+            epochs=1,
+            target_epsilon=8.0,
+            target_delta=1e-5,
+            max_grad_norm=1.0,
+        )
+
+        _set_empty_grad_samples(model)
+        optimizer.step()
+        epsilon = privacy_engine.accountant.get_epsilon(delta=1e-5)
+
+        self.assertGreater(epsilon, 0)
+        optimizer.zero_grad()
 
 
 if __name__ == "__main__":
