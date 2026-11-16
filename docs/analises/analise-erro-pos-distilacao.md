@@ -99,3 +99,35 @@ Aplicar somente depois de estabilizar e validar o carregador privado, para nao c
 - `data_loader.py`: conversao dos splits para o formato PyTorch.
 - `requirements.txt`: dependencias do projeto.
 - `docs/dp-sgd-opacus-fix.md`: correcao anterior de incompatibilidade de dimensao em `grad_sample`; e um problema distinto do erro de `dtype` aqui analisado.
+
+## Contorno para lote vazio no DP-SGD
+
+Data: 2026-11-14
+
+### Sintoma e causa
+
+Na execucao `dp-distill` com SST-2, 4096 exemplos de treino, `batch_size=8` e tres epocas, a distilacao terminou. O fine-tuning DP-SGD avancou ate uma amostra Poisson vazia chegar ao BERT. O lote tinha dimensao zero e o forward do BERT falhou ao remodelar os tensores de atencao. O ponto da falha esta registrado em `docs/error.txt`.
+
+O `DPDataLoader` do Opacus 1.4.0 usa amostragem Poisson e pode produzir lotes vazios. O adaptador de tuplas ja corrige a inferencia de tipos desses lotes, mas o modelo nao aceita o forward com tamanho de lote zero. A configuracao de dependencias fixa `opacus==1.4.0`.
+
+### Avaliacao das alternativas
+
+- **Pular com `continue`:** nao foi adotado. Isso evita o forward, mas tambem pula `optimizer.step()`, a adicao de ruido e o hook do accountant. Nao preserva exatamente o passo privado que o Opacus calibrou; nao assumir que e seguro sem uma analise especifica.
+- **Aumentar o batch:** reduz a probabilidade de lote vazio, mas nao a elimina e altera taxa de amostragem, quantidade de passos e calibracao de ruido. Pode ser usado como contorno temporario, desde que epsilon/delta sejam confirmados novamente.
+- **`drop_last`:** nao e a causa. O carregador original nao define `drop_last=True`, e o lote vazio resulta da amostragem Poisson, nao do ultimo lote incompleto do `DataLoader`.
+
+### Implementacao iniciada
+
+O loop DP-SGD agora identifica um lote vazio antes do forward e prepara `grad_sample` vazio para cada parametro treinavel. Em seguida executa normalmente `optimizer.step()`, `scheduler.step()` e `optimizer.zero_grad()`. No Opacus 1.4.0, o otimizador agrega o gradiente vazio, adiciona ruido e chama o hook de contabilizacao, sem passar os tensores vazios pelo BERT. Lotes vazios nao entram no calculo da loss media da epoca.
+
+Foi acrescentado um teste que prepara um passo vazio num modelo pequeno envolvido pelo Opacus e confirma que o accountant atualiza. O teste ainda precisa ser executado no ambiente Colab que contem PyTorch e Opacus.
+
+### Validacao necessaria no Colab
+
+1. Registrar as versoes efetivamente usadas com `python -c "import torch, opacus; print(torch.__version__, opacus.__version__)"`.
+2. Executar `python -m unittest discover -s tests -p "test_opacus_dataloader.py" -v`.
+3. Reexecutar o comando original de `dp-distill` com tres epocas, `batch_size=8` e a mesma semente.
+4. Confirmar que todas as epocas DP-SGD, a avaliacao e o teste terminam; registrar epsilon/delta reportados pelo accountant.
+5. Se o teste revelar incompatibilidade com o runtime Colab, nao substituir por `continue` nem desativar DP. Ajustar o tratamento para a versao efetiva do Opacus e repetir o teste de accountant antes do fluxo completo.
+
+O ambiente local desta alteracao nao possui PyTorch/Opacus nem a GPU do experimento; portanto, a validacao de runtime e de desempenho deve ocorrer no Colab. Esta implementacao ainda nao deve ser considerada validada no ambiente final ate a execucao dos passos acima.

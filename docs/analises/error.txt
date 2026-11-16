@@ -1,0 +1,70 @@
+Epoch 1:  16% 40/256 [00:24<01:46,  2.02it/s][W1114 17:47:04.399230668 CUDACachingAllocator.cpp:3934] memory allocation failed with OOM on device 0 while trying to allocate 3001024512 bytes (free: 1301413888, total: 23659151360).
+[W1114 17:47:04.596216398 CUDACachingAllocator.cpp:3934] memory allocation failed with OOM on device 0 while trying to allocate 3001024512 bytes (free: 1544683520, total: 23659151360).
+Epoch 1:  16% 40/256 [00:24<02:14,  1.61it/s]
+Traceback (most recent call last):
+  File "/content/DPED-Sistemas-Hibridos/main.py", line 610, in <module>
+    main()
+    ~~~~^^
+  File "/content/DPED-Sistemas-Hibridos/main.py", line 595, in main
+    _, metrics = run_method(
+                 ~~~~~~~~~~^
+        args.method, train_dataset, eval_dataset, test_dataset, public_dataset, config, device
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/content/DPED-Sistemas-Hibridos/main.py", line 415, in run_method
+    model, _ = train_model_with_dpsgd(model, train_dataset, eval_dataset, config, device)
+               ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/content/DPED-Sistemas-Hibridos/training.py", line 247, in train_model_with_dpsgd
+    loss.backward()
+    ~~~~~~~~~~~~~^^
+  File "/usr/local/lib/python3.13/dist-packages/torch/_tensor.py", line 623, in backward
+    torch.autograd.backward(
+    ~~~~~~~~~~~~~~~~~~~~~~~^
+        self, gradient, retain_graph, create_graph, inputs=inputs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/usr/local/lib/python3.13/dist-packages/torch/autograd/__init__.py", line 395, in backward
+    _engine_run_backward(
+    ~~~~~~~~~~~~~~~~~~~~^
+        tensors,
+        ^^^^^^^^
+    ...<5 lines>...
+        accumulate_grad=True,
+        ^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/usr/local/lib/python3.13/dist-packages/torch/autograd/graph.py", line 1072, in _engine_run_backward
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        t_outputs, *args, **kwargs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )  # Calls into the C++ engine to run the backward pass
+    ^
+  File "/usr/local/lib/python3.13/dist-packages/torch/nn/modules/module.py", line 90, in __call__
+    return self.hook(module, *args, **kwargs)
+           ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.13/dist-packages/opacus/grad_sample/grad_sample_module.py", line 339, in capture_backprops_hook
+    create_or_accumulate_grad_sample(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        param=param, grad_sample=gs, max_batch_len=module.max_batch_len
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/usr/local/lib/python3.13/dist-packages/opacus/grad_sample/grad_sample_module.py", line 57, in create_or_accumulate_grad_sample
+    param._current_grad_sample = torch.zeros(
+                                 ~~~~~~~~~~~^
+        torch.Size([max_batch_len]) + grad_sample.shape[1:],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        device=grad_sample.device,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+        dtype=grad_sample.dtype,
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.79 GiB. GPU 0 has a total capacity of 22.03 GiB of which 1.44 GiB is free. Including non-PyTorch memory, this process has 20.59 GiB memory in use. Of the allocated memory 14.86 GiB is allocated by PyTorch, and 5.50 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://docs.pytorch.org/docs/stable/notes/cuda.html#optimizing-memory-usage-with-pytorch-cuda-alloc-conf)
+Local directory '/content/DPED-Sistemas-Hibridos/models' does not exist yet. Skipping.
+Already exists on Drive: csv/glue_results.csv inside folder 2026-11-14/results
+Already exists on Drive: glue/results_summary.txt inside folder 2026-11-14/results
+Finished results. Copied 0 new files to Drive.
