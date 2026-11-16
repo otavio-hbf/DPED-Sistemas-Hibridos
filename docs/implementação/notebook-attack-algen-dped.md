@@ -4,7 +4,7 @@ Arquivo: [attack_algen_dped.ipynb](../../notebooks/attack_algen_dped.ipynb)
 
 Sequência de execução no Colab, no padrão de [dped_medium.ipynb](../../notebooks/dped_medium.ipynb):
 
-1. **Montagem do Drive e clone do repositório.** `git pull` se o repositório já existir, senão `git clone`. Depois `pip install -r requirements.txt`.
+1. **Montagem do Drive e clone do repositório.** `git pull` se o repositório já existir, senão `git clone`. Depois `pip install -r requirements.txt evaluate rouge-score pot wandb`. Os últimos quatro pacotes são necessários para importar o ALGEN (`evaluate` em `decoder_finetune_trainer.py`, `rouge-score` em `eval_metrics.py`, `pot` nos métodos de alinhamento e `wandb` em `decoder_finetune_trainer.py`), mas não estão no `requirements.txt` da raiz.
 2. **Export pré-downstream com `--skip_downstream`.** Os comandos de export pulam a task downstream (DP-SGD, teste e export pós-downstream). O atacante só usa o export pré-downstream, então o treino downstream não é necessário. O re-export grava `token_freq.npy`, necessário ao atacante na opção (c) da máscara de X.
 
 3. **Smoke test.** `attacker_dped_sentence.py` com 10 amostras de treino e 10 de teste. Valida o checkpoint, o export e a escrita dos CSVs.

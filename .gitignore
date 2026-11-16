@@ -72,6 +72,8 @@ data/
 datasets/
 
 #algen
-algen/SIH-ALGEN-main/outputs
+algen/SIH-ALGEN-main/outputs/**
+!algen/SIH-ALGEN-main/outputs/**/
+!algen/SIH-ALGEN-main/outputs/**/training_args_and_best_models.json
 algen/*.zip    
 .github/
