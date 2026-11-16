@@ -230,7 +230,7 @@ def _extract_word_embeddings(model):
 
 def _embedding_run_dir(config, method):
     epsilon_tag = str(config.epsilon).replace(".", "p")
-        run_dir_name = f"{config.dataset_name}_{config.task_name}_{method}_eps{epsilon_tag}"
+    run_dir_name = f"{config.dataset_name}_{config.task_name}_{method}_eps{epsilon_tag}"
     return os.path.join("results", "embeddings", run_dir_name)
 
 
