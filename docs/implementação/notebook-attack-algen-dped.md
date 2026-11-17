@@ -2,7 +2,9 @@
 
 Arquivo: [attack_algen_dped.ipynb](../../notebooks/attack_algen_dped.ipynb)
 
-Alternativa para a metodologia de ruido calibrado: [attack_algen_dped_calibracao_ruido.ipynb](../../notebooks/attack_algen_dped_calibracao_ruido.ipynb). Ela clona a branch `calibracao-de-ruido` e executa `--method dp-distill --embedding_privacy_sweep --delta 1e-5`, sem `--epsilon` ou DP-SGD downstream. Em 2026-11-17, a branch estava apenas local e ainda precisava ser enviada a `origin` para o clone no Colab funcionar. Antes de executar, envie a branch e coloque no Drive os pesos `.pt` do decodificador ALGEN congelado.
+Alternativa para a metodologia de ruido calibrado: [attack_algen_dped_calibracao_ruido.ipynb](../../notebooks/attack_algen_dped_calibracao_ruido.ipynb). Ela clona a branch `calibracao-de-ruido` e executa `--method dp-distill --embedding_privacy_sweep --delta 1e-5`, sem `--epsilon` ou DP-SGD downstream. Em 2026-11-17, a branch estava apenas local e ainda precisava ser enviada a `origin` para o clone no Colab funcionar. Antes de executar, envie a branch e coloque no Drive os pesos `.pt` do decodificador ALGEN congelado. A configuração atual mapeia explicitamente o caminho esperado `checkpoint_epoch_99.pt` para o arquivo informado `checkpoint_epoch_100.pt`; confirme que esse arquivo é o checkpoint que deseja usar.
+
+Antes da grade SST-2, o notebook inclui um sanity test end-to-end reduzido em CoLA (64 exemplos, 2 teachers, 1 época), seguido por verificações de quatro exports: vetores finitos, alinhamento de IDs/labels e epsilon correto nos metadados. As saídas ficam em `glue_cola_*`, separadas da grade SST-2, e não devem ser usadas como resultados do ataque.
 
 Sequência de execução no Colab, no padrão de [dped_medium.ipynb](../../notebooks/dped_medium.ipynb):
 

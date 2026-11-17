@@ -139,6 +139,7 @@ def update_config_from_args(config, args):
     config.learning_rate = args.learning_rate
     config.num_epochs = args.num_epochs
     config.weight_decay = args.weight_decay
+    config.seed = args.seed
 
     # Subset parameters
     config.max_train_samples = args.max_train_samples
@@ -655,15 +656,27 @@ def run_embedding_privacy_sweep(train_dataset, config, device):
             f"noise_multiplier={multiplier:.6g}, noise_std={noise_std:.6g}"
         )
 
+    print(
+        f"Training teacher ensemble ({config.num_teachers} teachers, "
+        f"{num_examples} examples)...",
+        flush=True,
+    )
     teacher_ensemble = TeacherEnsemble(config, train_dataset, device)
     teacher_ensemble.train_teachers(report_losses=False)
+    print("Teacher training complete; aggregating clipped embeddings...", flush=True)
     clipped_teacher_mean = teacher_ensemble.aggregate_clipped_embeddings(
         token_ids,
         clip_norm,
     )
+    print("Teacher embedding aggregation complete.", flush=True)
 
     experiment_records = []
-    for epsilon in epsilon_values:
+    for sweep_index, epsilon in enumerate(epsilon_values, start=1):
+        print(
+            f"\nEmbedding release [{sweep_index}/{len(epsilon_values)}]: "
+            f"starting epsilon={epsilon}",
+            flush=True,
+        )
         config.epsilon = epsilon
         set_seed(config.seed)
         student_model = StudentModel(config).to(device)
@@ -681,15 +694,21 @@ def run_embedding_privacy_sweep(train_dataset, config, device):
             config,
             device,
         )
+        output_dir = os.path.join(
+            _embedding_run_dir(config, "dp-distill"),
+            "dped_student_pre_downstream",
+        )
         save_dped_student_embeddings(
             student_model,
             tokenizer,
             token_ids,
-            os.path.join(
-                _embedding_run_dir(config, "dp-distill"),
-                "dped_student_pre_downstream",
-            ),
+            output_dir,
             privacy_metadata=privacy_metadata,
+        )
+        print(
+            f"Embedding release [{sweep_index}/{len(epsilon_values)}]: "
+            f"completed epsilon={epsilon}; export={output_dir}",
+            flush=True,
         )
         experiment_records.append({
             "method": "dp-distill-embedding-sweep",

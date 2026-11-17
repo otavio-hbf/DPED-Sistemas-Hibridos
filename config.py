@@ -31,6 +31,7 @@ class Config:
         self.num_epochs = 3
         self.warmup_steps = 0
         self.weight_decay = 0.01
+        self.seed = 42
         
         # Dataset parameters
         self.dataset_name = "glue"

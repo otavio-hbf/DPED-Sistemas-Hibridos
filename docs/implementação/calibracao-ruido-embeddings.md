@@ -56,6 +56,12 @@ A garantia cobre a influencia de um exemplo de treino na tabela liberada. Ela na
 
 Implementado em `privacy.py`, `models.py` e `main.py`. A opcao `--embedding_privacy_sweep` treina um ensemble uma vez e produz, sem DP-SGD downstream, uma exportacao para cada epsilon da grade. A lista de IDs vem do vocabulario completo do tokenizer; o ruido usa entropia do sistema operacional e nao e afetado por `--seed`.
 
+O argumento `--seed` e preservado em `Config` e usado para inicializar cada Student no sweep. Ele controla a reproducibilidade do treino, mas nao a amostragem do ruido Gaussiano.
+
+O sweep informa o inicio/conclusao do treino e agregacao dos teachers, o inicio e a conclusao de cada liberacao de epsilon (`[1/4]` a `[4/4]`) e o caminho do export correspondente. A destilacao exibe uma barra interna de progresso; as perdas dos teachers permanecem omitidas.
+
+O notebook de ataque executa primeiro um sanity test reduzido em CoLA (64 exemplos, 2 teachers, 1 epoca) e valida os quatro exports antes da grade principal SST-2. Essas saidas sao separadas e nao devem ser interpretadas como resultados experimentais.
+
 Os testes unitarios cobrem clipping, validacao de delta, monotonicidade do multiplicador, o epsilon calculado pelo accountant, a origem independente do ruido e os metadados da tabela privatizada. A exportacao foi atualizada para preservar o alinhamento de todos os IDs e labels sem gravar contagens privadas de tokens.
 
 O preflight confirma que a composicao do vocabulario completo pode resultar em ruido muito alto. Isso e um resultado da escolha de release e do budget, nao um erro a contornar: qualquer reducao do vocabulario ou mudanca de sensibilidade exige revisao metodologica e documentacao propria. O teste unitario nao substitui uma execucao completa com teachers, que depende dos pesos e dos dados do experimento.
