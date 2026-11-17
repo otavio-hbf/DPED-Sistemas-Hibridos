@@ -15,6 +15,11 @@ from utils import set_seed, get_device, plot_privacy_utility_tradeoff
 from data_loader import load_glue_dataset, load_conll_dataset, create_public_dataset
 # Updated import from combined models file
 from models import StudentModel, BertForTokenClassification, TeacherEnsemble, distill_embeddings, pate_distillation
+from privacy import (
+    calculate_embedding_clip_norm,
+    embedding_noise_multiplier,
+    privatize_embedding_table,
+)
 from training import train_model_with_dpsgd, train_model_without_dp, test_model
 
 def parse_args():
@@ -93,6 +98,8 @@ def parse_args():
                         help="Run all methods for comparison")
     parser.add_argument("--privacy_utility_tradeoff", action="store_true",
                         help="Run privacy-utility tradeoff experiment")
+    parser.add_argument("--embedding_privacy_sweep", action="store_true",
+                        help="Run the embedding-only DPED sweep for epsilon 1, 2, 4, and 8")
     parser.add_argument("--skip_downstream", action="store_true",
                         help="dp-distill only: stop after distillation and the pre-downstream export "
                              "(no DP-SGD fine-tuning, no test, no post-downstream export)")
@@ -184,19 +191,19 @@ def save_results_summary(args, config, experiment_records):
         f.write("\nMetrics by run:\n")
         for i, record in enumerate(experiment_records, start=1):
             metrics = record["metrics"]
-            accuracy = metrics.get("accuracy", float("nan"))
-            precision = metrics.get("precision", float("nan"))
-            recall = metrics.get("recall", float("nan"))
-            f1 = metrics.get("f1", float("nan"))
-
             f.write(
                 f"Run {i}: method={record['method']}, epsilon={record['epsilon']}, "
                 f"enable_dp={record['enable_dp']}\n"
             )
-            f.write(f"  Accuracy: {accuracy:.6f}\n")
-            f.write(f"  Precision: {precision:.6f}\n")
-            f.write(f"  Recall: {recall:.6f}\n")
-            f.write(f"  F1: {f1:.6f}\n")
+            if metrics:
+                f.write(f"  Accuracy: {metrics.get('accuracy', float('nan')):.6f}\n")
+                f.write(f"  Precision: {metrics.get('precision', float('nan')):.6f}\n")
+                f.write(f"  Recall: {metrics.get('recall', float('nan')):.6f}\n")
+                f.write(f"  F1: {metrics.get('f1', float('nan')):.6f}\n")
+            else:
+                f.write("  Task metrics: not run (embedding-only experiment)\n")
+            for key, value in sorted(record.get("privacy_metadata", {}).items()):
+                f.write(f"  {key}: {value}\n")
 
         f.write("=" * 100 + "\n")
 
@@ -234,32 +241,37 @@ def _embedding_run_dir(config, method):
     return os.path.join("results", "embeddings", run_dir_name)
 
 
-def save_dped_student_embeddings(model, tokenizer, public_dataset, output_dir, token_counts=None):
-    """Save DPED-distilled student vectors with the corresponding BERT tokens and teacher frequencies."""
-    token_ids = set()
-    for index in range(len(public_dataset)):
-        input_ids = public_dataset[index]["input_ids"]
-        if isinstance(input_ids, torch.Tensor):
-            input_ids = input_ids.detach().cpu().reshape(-1).tolist()
-        token_ids.update(int(token_id) for token_id in input_ids if int(token_id) != 0)
+def _full_tokenizer_ids(tokenizer, embedding_rows):
+    """Return all contiguous tokenizer IDs that have a Student embedding row."""
+    token_ids = sorted(set(int(token_id) for token_id in tokenizer.get_vocab().values()))
+    if token_ids != list(range(embedding_rows)):
+        raise ValueError(
+            "Tokenizer vocabulary IDs must exactly match the Student embedding table."
+        )
+    return token_ids
 
-    token_ids = sorted(token_ids)
+
+def save_dped_student_embeddings(model, tokenizer, token_ids, output_dir, privacy_metadata=None):
+    """Save privatized Student lookup vectors with aligned token IDs and labels."""
+    token_ids = [int(token_id) for token_id in token_ids]
     if not token_ids:
-        raise ValueError("Cannot save DPED embeddings: no non-padding public tokens found.")
+        raise ValueError("Cannot save DPED embeddings: the tokenizer vocabulary is empty.")
+    if len(set(token_ids)) != len(token_ids):
+        raise ValueError("Cannot save DPED embeddings: token IDs must be unique.")
 
     token_labels = tokenizer.convert_ids_to_tokens(token_ids)
     if len(token_labels) != len(token_ids):
         raise ValueError("Tokenizer returned a different number of labels than token IDs.")
 
-    embeddings = _extract_word_embeddings(model)[torch.tensor(token_ids, dtype=torch.long)]
+    embedding_table = _extract_word_embeddings(model)
+    if max(token_ids) >= embedding_table.shape[0]:
+        raise ValueError("Cannot save DPED embeddings: token ID exceeds the Student table.")
+    embeddings = embedding_table[torch.tensor(token_ids, dtype=torch.long)]
     os.makedirs(output_dir, exist_ok=True)
 
     torch.save(embeddings, os.path.join(output_dir, "token_embeddings.pt"))
     np.save(os.path.join(output_dir, "token_embeddings.npy"), embeddings.numpy())
     np.save(os.path.join(output_dir, "token_ids.npy"), np.asarray(token_ids, dtype=np.int64))
-    if token_counts is not None:
-        token_freq = [int(token_counts.get(token_id, 0)) for token_id in token_ids]
-        np.save(os.path.join(output_dir, "token_freq.npy"), np.asarray(token_freq, dtype=np.int64))
     with open(os.path.join(output_dir, "token_labels.json"), "w", encoding="utf-8") as f:
         json.dump(token_labels, f, ensure_ascii=True, indent=2)
 
@@ -269,6 +281,9 @@ def save_dped_student_embeddings(model, tokenizer, public_dataset, output_dir, t
         f.write(f"shape={tuple(embeddings.shape)}\n")
         f.write("row_alignment=token_ids.npy and token_labels.json\n")
         f.write("files=token_embeddings.pt,token_embeddings.npy,token_ids.npy,token_labels.json\n")
+        if privacy_metadata:
+            for key, value in sorted(privacy_metadata.items()):
+                f.write(f"{key}={value}\n")
 
 
 def _extract_split_labels(dataset):
@@ -351,6 +366,15 @@ def save_model_embeddings(model, config, method, train_dataset=None, eval_datase
         f.write(f"task={config.task_name}\n")
         f.write(f"method={method}\n")
         f.write(f"epsilon={config.epsilon}\n")
+        if method == "dp-distill":
+            f.write("embedding_epsilon_target={}\n".format(config.epsilon))
+            f.write("embedding_delta_target={}\n".format(config.delta))
+            if config.enable_dp:
+                f.write("downstream_epsilon_target={}\n".format(config.epsilon))
+                f.write("downstream_delta_target={}\n".format(config.delta))
+                f.write("privacy_composition=embedding release and downstream DP-SGD are separate stages; total not computed\n")
+            else:
+                f.write("privacy_composition=embedding release only; downstream fine-tuning is non-private\n")
         f.write(f"shape={tuple(embeddings.shape)}\n")
         f.write("files=token_embeddings.pt,token_embeddings.npy\n")
         if split_info:
@@ -444,20 +468,26 @@ def run_method(method, train_dataset, eval_dataset, test_dataset, public_dataset
             model, _ = train_model_without_dp(model, train_dataset, eval_dataset, config_copy, device)
     
     elif method == "dp-distill":
-        # Our proposed method: Teacher-Student Distillation with Multi-Layer DP
+        # Train and aggregate teachers before distilling the fixed tokenizer vocabulary.
         # Create and train teacher ensemble
         teacher_ensemble = TeacherEnsemble(config, train_dataset, device)
-        teacher_ensemble.train_teachers()
-        
-        # First distill embeddings
-        model = distill_embeddings(teacher_ensemble, model, public_dataset, config, device)
+        teacher_ensemble.train_teachers(report_losses=False)
         tokenizer = BertTokenizer.from_pretrained(config.bert_model)
+        token_ids = _full_tokenizer_ids(
+            tokenizer,
+            model.bert.embeddings.word_embeddings.num_embeddings,
+        )
+        teacher_embeddings, privacy_metadata = teacher_ensemble.generate_embeddings(
+            token_ids,
+            model,
+        )
+        model = distill_embeddings(model, teacher_embeddings, config, device)
         save_dped_student_embeddings(
             model,
             tokenizer,
-            public_dataset,
+            token_ids,
             os.path.join(_embedding_run_dir(config, method), "dped_student_pre_downstream"),
-            token_counts=teacher_ensemble.get_token_frequency(public_dataset),
+            privacy_metadata=privacy_metadata,
         )
 
         if getattr(config, "skip_downstream", False):
@@ -517,7 +547,11 @@ def run_privacy_utility_tradeoff(train_dataset, eval_dataset, test_dataset, publ
     print("\nRunning privacy-utility tradeoff experiment...")
     
     # Define methods to compare
-    methods = ["non-private", "dp-sgd", "pate-distill", "dp-distill"]
+    methods = ["non-private", "dp-sgd", "pate-distill"]
+    print(
+        "dp-distill is omitted from the downstream utility sweep; "
+        "use --embedding_privacy_sweep to evaluate its embedding release."
+    )
     
     # Define epsilon values to test
     epsilon_values = [1.0, 2.0, 4.0, 8.0, 16.0]
@@ -587,9 +621,100 @@ def run_privacy_utility_tradeoff(train_dataset, eval_dataset, test_dataset, publ
     return experiment_records
 
 
+def run_embedding_privacy_sweep(train_dataset, config, device):
+    """Train one teacher ensemble and release one full-vocabulary table per epsilon."""
+    epsilon_values = [1.0, 2.0, 4.0, 8.0]
+    print(
+        "Privacy note: each exported table has its own epsilon target. "
+        "Releasing all tables together requires composing the four mechanisms."
+    )
+    tokenizer = BertTokenizer.from_pretrained(config.bert_model)
+    reference_student = StudentModel(config)
+    token_ids = _full_tokenizer_ids(
+        tokenizer,
+        reference_student.bert.embeddings.word_embeddings.num_embeddings,
+    )
+    clip_norm = calculate_embedding_clip_norm(
+        reference_student.bert.embeddings.word_embeddings.weight,
+        quantile=config.embedding_clip_quantile,
+    )
+    del reference_student
+
+    num_examples = len(train_dataset)
+    for epsilon in epsilon_values:
+        multiplier = embedding_noise_multiplier(
+            epsilon=epsilon,
+            delta=config.delta,
+            num_tokens=len(token_ids),
+            num_examples=num_examples,
+        )
+        noise_std = multiplier * (2.0 * clip_norm / config.num_teachers)
+        print(
+            f"Embedding release preflight: epsilon={epsilon}, delta={config.delta}, "
+            f"tokens={len(token_ids)}, clip_norm={clip_norm:.6g}, "
+            f"noise_multiplier={multiplier:.6g}, noise_std={noise_std:.6g}"
+        )
+
+    teacher_ensemble = TeacherEnsemble(config, train_dataset, device)
+    teacher_ensemble.train_teachers(report_losses=False)
+    clipped_teacher_mean = teacher_ensemble.aggregate_clipped_embeddings(
+        token_ids,
+        clip_norm,
+    )
+
+    experiment_records = []
+    for epsilon in epsilon_values:
+        config.epsilon = epsilon
+        set_seed(config.seed)
+        student_model = StudentModel(config).to(device)
+        teacher_embeddings, privacy_metadata = privatize_embedding_table(
+            clipped_teacher_mean=clipped_teacher_mean,
+            num_teachers=config.num_teachers,
+            clip_norm=clip_norm,
+            epsilon=epsilon,
+            delta=config.delta,
+            num_examples=num_examples,
+        )
+        student_model = distill_embeddings(
+            student_model,
+            teacher_embeddings,
+            config,
+            device,
+        )
+        save_dped_student_embeddings(
+            student_model,
+            tokenizer,
+            token_ids,
+            os.path.join(
+                _embedding_run_dir(config, "dp-distill"),
+                "dped_student_pre_downstream",
+            ),
+            privacy_metadata=privacy_metadata,
+        )
+        experiment_records.append({
+            "method": "dp-distill-embedding-sweep",
+            "epsilon": epsilon,
+            "enable_dp": True,
+            "metrics": {},
+            "privacy_metadata": privacy_metadata,
+        })
+
+    return experiment_records
+
+
 def main():
     """Main function to run experiments"""
     args = parse_args()
+    if args.embedding_privacy_sweep and (
+        args.method != "dp-distill"
+        or args.run_all_methods
+        or args.privacy_utility_tradeoff
+        or args.no_dp
+    ):
+        raise SystemExit(
+            "--embedding_privacy_sweep requires --method dp-distill and cannot be combined "
+            "with method-comparison, privacy-utility, or --no_dp options."
+        )
     if args.skip_downstream and (args.method != "dp-distill" or args.run_all_methods or args.privacy_utility_tradeoff):
         raise SystemExit("--skip_downstream is only supported with --method dp-distill (single run).")
     
@@ -616,13 +741,26 @@ def main():
     print(f"Eval dataset size: {len(eval_dataset)}")
     print(f"Test dataset size: {len(test_dataset)}")
     
-    # Create public dataset for distillation
-    public_dataset = create_public_dataset(config, size=config.max_public_samples)
-    print(f"Public dataset size: {len(public_dataset)}")
+    # PATE and multi-method comparisons still need the labeled-data-derived query set.
+    needs_public_dataset = (
+        args.run_all_methods
+        or args.privacy_utility_tradeoff
+        or args.method == "pate-distill"
+    )
+    public_dataset = None
+    if needs_public_dataset:
+        public_dataset = create_public_dataset(config, size=config.max_public_samples)
+        print(f"Public dataset size: {len(public_dataset)}")
     
     # Run experiments
     experiment_records = []
-    if args.privacy_utility_tradeoff:
+    if args.embedding_privacy_sweep:
+        experiment_records = run_embedding_privacy_sweep(
+            train_dataset,
+            config,
+            device,
+        )
+    elif args.privacy_utility_tradeoff:
         # Run privacy-utility tradeoff experiment
         experiment_records = run_privacy_utility_tradeoff(
             train_dataset, eval_dataset, test_dataset, public_dataset, config, device

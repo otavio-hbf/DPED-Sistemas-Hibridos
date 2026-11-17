@@ -3,6 +3,8 @@
 Data: 2026-11-13
 Escopo: contagem de tokens usada na distilacao de embeddings do metodo `dp-distill`
 
+> **Historico/superado:** desde 2026-11-17, a liberacao DPED usa o vocabulario fixo completo e nao consulta frequencias de tokens. `get_token_frequency()` e mantida apenas para compatibilidade com analises e testes legados; nao participa da geracao nem da exportacao DPED atual. Este documento registra a otimizacao do fluxo anterior e nao descreve o mecanismo vigente.
+
 ## Objetivo
 
 Reduzir o tempo de execucao e o uso desnecessario de GPU durante a etapa de contagem, sem pular a etapa nem alterar o criterio metodologico usado para identificar tokens raros.

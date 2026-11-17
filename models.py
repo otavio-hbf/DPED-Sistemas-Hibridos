@@ -9,7 +9,12 @@ from torch.nn.utils import clip_grad_norm_
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 import random
-import numpy as np
+
+from privacy import (
+    calculate_embedding_clip_norm,
+    clip_embedding_rows,
+    privatize_embedding_table,
+)
 
 class StudentModel(nn.Module):
     def __init__(self, config):
@@ -221,10 +226,11 @@ class TeacherEnsemble:
         else:
             return 2  # Default
     
-    def train_teachers(self):
+    def train_teachers(self, report_losses=True):
         """Train all teacher models on their respective datasets."""
         for teacher_idx, (teacher_model, teacher_dataset) in enumerate(zip(self.teacher_models, self.teacher_datasets)):
-            print(f"\nTraining Teacher {teacher_idx+1}/{self.num_teachers}")
+            if report_losses:
+                print(f"\nTraining Teacher {teacher_idx+1}/{self.num_teachers}")
 
             teacher_model = teacher_model.to(self.device)
             
@@ -254,7 +260,11 @@ class TeacherEnsemble:
             teacher_model.train()
             for epoch in range(self.config.num_epochs):
                 epoch_loss = 0
-                for batch in tqdm(teacher_loader, desc=f"Teacher {teacher_idx+1}, Epoch {epoch+1}"):
+                for batch in tqdm(
+                    teacher_loader,
+                    desc=f"Teacher {teacher_idx+1}, Epoch {epoch+1}",
+                    disable=not report_losses,
+                ):
                     # Move batch to device
                     batch = {k: v.to(self.device) for k, v in batch.items() if k != 'idx'}
                     
@@ -285,8 +295,9 @@ class TeacherEnsemble:
                     
                     epoch_loss += loss.item()
 
-                avg_loss = epoch_loss / len(teacher_loader)
-                print(f"Teacher {teacher_idx+1}, Epoch {epoch+1} average loss: {avg_loss:.4f}")
+                if report_losses:
+                    avg_loss = epoch_loss / len(teacher_loader)
+                    print(f"Teacher {teacher_idx+1}, Epoch {epoch+1} average loss: {avg_loss:.4f}")
 
             teacher_model.to("cpu")
             if torch.cuda.is_available():
@@ -327,81 +338,54 @@ class TeacherEnsemble:
 
         return token_counts
     
-    def generate_embeddings(self, public_dataset, student_model):
-        """
-        Generate aggregated embeddings with DP noise for student distillation.
-        
-        Args:
-            public_dataset: Unlabeled dataset for distillation
-            student_model: Student model to be trained
-        
-        Returns:
-            Dictionary mapping input_ids to aggregated teacher embeddings
-        """
-        # First get token frequency
-        token_counts = self.get_token_frequency(public_dataset)
-        
-        # Create dataloader for public dataset
-        public_loader = DataLoader(
-            public_dataset,
-            batch_size=self.config.batch_size,
-            shuffle=False
+    def aggregate_clipped_embeddings(self, token_ids, clip_norm, rows_per_batch=512):
+        """Average teacher lookup vectors after per-token L2 clipping."""
+        if not token_ids:
+            raise ValueError("The fixed tokenizer vocabulary must not be empty.")
+        if len(set(token_ids)) != len(token_ids):
+            raise ValueError("Tokenizer vocabulary IDs must be unique.")
+
+        first_teacher = self.teacher_models[0]
+        embedding_weight = first_teacher.bert.embeddings.word_embeddings.weight
+        vocab_size, embedding_dim = embedding_weight.shape
+        if min(token_ids) < 0 or max(token_ids) >= vocab_size:
+            raise ValueError("Tokenizer vocabulary IDs exceed the teacher embedding table.")
+
+        token_id_tensor = torch.tensor(token_ids, dtype=torch.long)
+        clipped_sum = torch.zeros((len(token_ids), embedding_dim), dtype=torch.float32)
+
+        for teacher in self.teacher_models:
+            teacher = teacher.to(self.device)
+            teacher_weight = teacher.bert.embeddings.word_embeddings.weight
+            for start in range(0, len(token_ids), rows_per_batch):
+                end = min(start + rows_per_batch, len(token_ids))
+                batch_ids = token_id_tensor[start:end].to(self.device)
+                vectors = teacher_weight.index_select(0, batch_ids).detach()
+                clipped = clip_embedding_rows(vectors, clip_norm)
+                clipped_sum[start:end].add_(clipped.to(device="cpu", dtype=torch.float32))
+            teacher.to("cpu")
+
+        return clipped_sum.div_(len(self.teacher_models))
+
+    def generate_embeddings(self, token_ids, student_model, clipped_teacher_mean=None):
+        """Generate a full-vocabulary embedding table with calibrated Gaussian noise."""
+        student_weight = student_model.bert.embeddings.word_embeddings.weight.detach()
+        clip_norm = calculate_embedding_clip_norm(
+            student_weight,
+            quantile=self.config.embedding_clip_quantile,
         )
-        
-        # Extract BERT embedding layer from the student model
-        student_embeddings = student_model.bert.embeddings.word_embeddings.weight.data
-        
-        # Dictionary to store aggregated embeddings
-        aggregated_embeddings = {}
-        
-        # Process batches
-        for batch in tqdm(public_loader, desc="Generating teacher embeddings"):
-            input_ids = batch['input_ids'].to(self.device)
-            attention_mask = batch['attention_mask'].to(self.device)
-            
-            # Get embeddings from each teacher
-            teacher_outputs = []
-            for teacher in self.teacher_models:
-                teacher = teacher.to(self.device)
-                teacher.eval()
-                with torch.no_grad():
-                    # Extract the embedding layer output
-                    embedding_output = teacher.bert.embeddings.word_embeddings(input_ids)
-                    teacher_outputs.append(embedding_output)
-                teacher.to("cpu")
-            
-            # Stack and average teacher outputs
-            stacked_outputs = torch.stack(teacher_outputs)  # [num_teachers, batch_size, seq_len, embed_dim]
-            mean_output = stacked_outputs.mean(dim=0)  # [batch_size, seq_len, embed_dim]
-            
-            # Apply DP noise based on token frequency
-            for i in range(input_ids.size(0)):  # For each item in batch
-                for j in range(input_ids.size(1)):  # For each token position
-                    token_id = input_ids[i, j].item()
-                    if token_id == 0:  # Skip padding tokens
-                        continue
-                        
-                    # Check if token is rare
-                    token_freq = token_counts.get(token_id, 0)
-                    is_rare = token_freq < self.config.rare_token_threshold
-                    
-                    # Apply noise based on token rarity
-                    noise_scale = self.config.teacher_aggregation_noise
-                    if is_rare:
-                        noise_scale *= self.config.rare_token_noise_factor
-                        
-                    # Generate Gaussian noise
-                    noise = torch.randn_like(mean_output[i, j]) * noise_scale
-                    
-                    # If extremely rare, use student's pre-trained embedding instead
-                    if token_freq == 0:
-                        aggregated_embeddings[token_id] = student_embeddings[token_id].clone().to(self.device)
-                    else:
-                        # Add noise to create DP embedding
-                        dp_embedding = mean_output[i, j] + noise
-                        aggregated_embeddings[token_id] = dp_embedding
-        
-        return aggregated_embeddings
+        if clipped_teacher_mean is None:
+            clipped_teacher_mean = self.aggregate_clipped_embeddings(token_ids, clip_norm)
+
+        num_examples = sum(len(dataset) for dataset in self.teacher_datasets)
+        return privatize_embedding_table(
+            clipped_teacher_mean=clipped_teacher_mean,
+            num_teachers=len(self.teacher_models),
+            clip_norm=clip_norm,
+            epsilon=self.config.epsilon,
+            delta=self.config.delta,
+            num_examples=num_examples,
+        )
 
     def private_ensemble_prediction(self, dataloader, noise_multiplier):
         """
@@ -463,14 +447,13 @@ class TeacherEnsemble:
         return torch.cat(all_private_labels, dim=0)
 
 
-def distill_embeddings(teacher_ensemble, student_model, public_dataset, config, device):
+def distill_embeddings(student_model, teacher_embeddings, config, device):
     """
     Train the student model by distilling knowledge from teacher embeddings.
     
     Args:
-        teacher_ensemble: Ensemble of teacher models
         student_model: Student model to be trained
-        public_dataset: Unlabeled dataset for distillation
+        teacher_embeddings: Privatized full-vocabulary embedding table
         config: Configuration object
         device: Device to run on
         
@@ -478,9 +461,6 @@ def distill_embeddings(teacher_ensemble, student_model, public_dataset, config, 
         Trained student model
     """
     print("Starting the embedding distillation process...")
-    
-    # Generate aggregated teacher embeddings with DP
-    teacher_embeddings = teacher_ensemble.generate_embeddings(public_dataset, student_model)
     
     # Set up optimizer
     optimizer = AdamW(
@@ -494,29 +474,35 @@ def distill_embeddings(teacher_ensemble, student_model, public_dataset, config, 
     for epoch in range(config.num_epochs):
         epoch_loss = 0
         
-        # Iterate through token embeddings (in random order for better training)
-        token_ids = list(teacher_embeddings.keys())
+        # Iterate through the fixed vocabulary in a random order.
+        token_ids = list(range(teacher_embeddings.shape[0]))
         random.shuffle(token_ids)
-        
-        for token_id in tqdm(token_ids, desc=f"Distillation Epoch {epoch+1}"):
-            # Get student embedding for this token
-            student_embedding = student_model.bert.embeddings.word_embeddings.weight[token_id].clone().to(device)
-            
-            # Get teacher embedding
-            teacher_embedding = teacher_embeddings[token_id]
-            
-            # Compute MSE loss
+
+        for start in tqdm(
+            range(0, len(token_ids), config.batch_size),
+            desc=f"Distillation Epoch {epoch+1}",
+        ):
+            batch_token_ids = torch.tensor(
+                token_ids[start:start + config.batch_size],
+                dtype=torch.long,
+                device=device,
+            )
+            student_embedding = student_model.bert.embeddings.word_embeddings.weight.index_select(
+                0, batch_token_ids
+            )
+            teacher_embedding = teacher_embeddings.index_select(
+                0, batch_token_ids.cpu()
+            ).to(device)
             loss = nn.MSELoss()(student_embedding, teacher_embedding)
-            
-            # Backward pass and optimization
+
             optimizer.zero_grad()
             loss.backward()
             clip_grad_norm_(student_model.parameters(), config.max_grad_norm)
             optimizer.step()
-            
-            epoch_loss += loss.item()
-        
-        avg_loss = epoch_loss / len(teacher_embeddings)
+
+            epoch_loss += loss.item() * len(batch_token_ids)
+
+        avg_loss = epoch_loss / teacher_embeddings.shape[0]
         print(f"Distillation Epoch {epoch+1} average loss: {avg_loss:.4f}")
     
     return student_model

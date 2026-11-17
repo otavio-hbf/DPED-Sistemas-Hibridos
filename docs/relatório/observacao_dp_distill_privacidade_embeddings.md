@@ -1,7 +1,9 @@
 # Observacao: privacidade e destilacao de embeddings no `dp-distill`
 
-Data da observacao: 2026-11-15  
+Data da observacao: 2026-11-15
 Escopo: comparacao entre a metodologia descrita em `docs/dped_multi_layer_noise_distillation_for_privacy_preserving_text_embeddings.md`, o fluxo implementado no repositorio e o resultado SST-2 fornecido no notebook.
+
+> **Analise historica, anterior a 2026-11-17.** As descricoes do mecanismo de embeddings abaixo registram o estado do codigo analisado naquela data e nao descrevem a implementacao atual. A calibracao por epsilon, o clipping, a composicao RDP e a liberacao do vocabulario completo estao documentados em [`calibracao-ruido-embeddings.md`](../implementação/calibracao-ruido-embeddings.md). O sweep atual mede a liberacao pre-downstream sem DP-SGD; conclusoes antigas sobre `teacher_noise`, frequencias e privacidade dessa liberacao nao devem ser aplicadas a ele.
 
 > **Resumo executivo**
 >
@@ -146,3 +148,21 @@ Referencias principais:
 - Amostragem do conjunto chamado de publico: [`data_loader.py`](../../data_loader.py#L257)
 - Configuracao do DP-SGD e epsilon-alvo: [`training.py`](../../training.py#L175)
 - Injecao de ruido no `StudentModel.forward`: [`models.py`](../../models.py#L54)
+
+## 7. Atualizacao apos a implementacao da calibracao (2026-11-17)
+
+A observacao acima descreve o codigo anterior a esta mudanca. O fluxo de embeddings foi atualizado para:
+
+- usar todos os IDs fixos do vocabulario do tokenizer, em vez de selecionar tokens a partir do conjunto chamado de publico;
+- aplicar clipping L2 por vetor de token nos teachers, com limite definido pelo percentil 95 das normas da tabela pre-treinada publica do Student;
+- calibrar o ruido Gaussiano por token com o accountant RDP do Opacus, compondo uma consulta por token para o epsilon e delta informados;
+- remover a frequencia de tokens e o fallback baseado nela da geracao e da exportacao DPED;
+- exportar os embeddings antes do fine-tuning downstream, com IDs, labels e metadados do mecanismo.
+
+O comando `--embedding_privacy_sweep` executa a grade `epsilon = 1, 2, 4, 8` e nao executa DP-SGD downstream. O delta inicial permanece `1e-5`, mas a execucao valida que `delta < 1/N` para o numero efetivo de exemplos privados. O clipping e calibrado a partir do Student pre-treinado, sem consultar os dados privados.
+
+O preflight com Opacus 1.4.0, `delta=1e-5` e 30.522 tokens produziu multiplicadores RDP de 710, 376,25, 202,5 e 111,40625 para epsilon 1, 2, 4 e 8, respectivamente. O desvio-padrao aplicado ainda multiplica esses valores pela sensibilidade `2C/K`; portanto, a utilidade pode cair substancialmente. O resultado deve ser avaliado diretamente contra os ataques de inversao, sem reduzir silenciosamente o vocabulario ou o ruido.
+
+Cada artefato da grade tem o epsilon indicado individualmente. A liberacao conjunta de varias tabelas da mesma grade requer compor os mecanismos; a grade nao tem, como conjunto, o epsilon de uma de suas execucoes. Qualquer DP-SGD executado depois e outra etapa e tambem precisa ser composta antes de declarar uma garantia total.
+
+O preflight e os testes unitarios validam a calibracao e as invariantes locais, mas nao constituem uma prova formal nem substituem uma execucao completa com os dados do experimento e a avaliacao dos ataques.

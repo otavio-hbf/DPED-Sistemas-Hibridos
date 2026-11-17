@@ -23,6 +23,7 @@ class Config:
         # Teacher-Student parameters
         self.num_teachers = 5
         self.teacher_aggregation_noise = 0.5  # Noise for teacher output aggregation
+        self.embedding_clip_quantile = 0.95
         
         # Training parameters
         self.batch_size = 16

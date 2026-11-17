@@ -1,14 +1,14 @@
 """
 Sentence-level ALGEN alignment attack on DPED static token embeddings.
 
-X (source) of a sentence: mean of the DPED token rows of its content tokens whose
-token_freq > 0 in the export, L2-normalized. Tokens outside the export or with
-token_freq == 0 are dropped. Sentences without any such token are skipped.
+X (source) of a sentence: mean of the DPED token rows of its content tokens in
+the fixed tokenizer vocabulary, excluding special tokens, L2-normalized.
+Sentences without any such token are skipped.
 Y (target): flan-t5 encoder mean-pool of the sentence, L2-normalized.
 The decoder is the frozen pretrained ALGEN checkpoint; only the ridge map X->Y is fitted.
 
 Baseline: --source bert_pretrained uses the bert-base-uncased word-embedding rows
-for the same token_ids and the same token_freq mask.
+for the same full-vocabulary token_ids and special-token mask.
 """
 import argparse
 import json
@@ -28,12 +28,6 @@ from inversion_utils import set_seed, add_punctuation_token_ids, get_Y_embedding
 
 def load_static_embeddings(export_dir, source, bert_model, special_ids):
     token_ids = np.load(os.path.join(export_dir, "token_ids.npy"))
-    freq_path = os.path.join(export_dir, "token_freq.npy")
-    if not os.path.exists(freq_path):
-        raise FileNotFoundError(f"{freq_path} not found. Re-export DPED with token_freq (see exportacao-embeddings-dped.md).")
-    token_freq = np.load(freq_path)
-    if len(token_freq) != len(token_ids):
-        raise ValueError("token_freq.npy and token_ids.npy have different lengths.")
 
     if source == "dped":
         table = np.load(os.path.join(export_dir, "token_embeddings.npy"))
@@ -48,7 +42,7 @@ def load_static_embeddings(export_dir, source, bert_model, special_ids):
         raise ValueError("Embedding rows and token_ids have different lengths.")
 
     row_of = {int(t): i for i, t in enumerate(token_ids)}
-    allowed = {int(t) for t, f in zip(token_ids, token_freq) if f > 0 and int(t) not in special_ids}
+    allowed = {int(token_id) for token_id in token_ids if int(token_id) not in special_ids}
     return table, row_of, allowed
 
 
@@ -110,7 +104,7 @@ class DPEDSentenceDecoder(DecoderInference):
 def main():
     parser = argparse.ArgumentParser(description="Sentence-level ALGEN attack on DPED embeddings.")
     parser.add_argument("--checkpoint_path", required=True, help="ALGEN decoder checkpoint directory.")
-    parser.add_argument("--export_dir", required=True, help="DPED export dir with token_ids, token_embeddings, token_freq.")
+    parser.add_argument("--export_dir", required=True, help="DPED export dir with full-vocabulary token_ids and token_embeddings.")
     parser.add_argument("--source", choices=["dped", "bert_pretrained"], default="dped")
     parser.add_argument("--bert_model", default="bert-base-uncased")
     parser.add_argument("--epsilon", default=None, help="Label only, stored in the output.")
