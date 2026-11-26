@@ -27,7 +27,9 @@ class NotebookGridTests(unittest.TestCase):
             smoke = cells["attack_smoke"]
             self.assertIn("check=True", cells[export_id])
             self.assertIn("persist_embedding_exports", cells[export_id])
-            self.assertIn("check=True", smoke)
+            self.assertIn("capture_output=True", smoke)
+            self.assertIn("smoke_result.stderr", smoke)
+            self.assertIn("smoke_result.returncode", smoke)
             self.assertIn("persist_path(", smoke)
 
     def test_persistence_helpers_copy_and_fail_on_missing_stage_artifact(self):

@@ -51,6 +51,8 @@ Drive os exports assim que o sweep termina, o preflight e o smoke assim que
 cada etapa termina, e cada diretório de resultado logo após a execução de cada
 célula da grade. Tudo fica sob um diretório único por execução em
 `SIH/privEmbeddings/<RUN_ID>/`; a cópia final é uma sincronização adicional.
+Em caso de falha do smoke, a célula exibe separadamente stdout e stderr do
+processo atacante antes de interromper o notebook, para expor a exceção interna.
 
 O procedimento de teste adotado mantém o comportamento do código: primeiras
 frases elegíveis de `validation`, na ordem do dataset. O alinhamento usa
