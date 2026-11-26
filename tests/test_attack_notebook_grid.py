@@ -1,5 +1,6 @@
 import contextlib
 import ast
+import importlib
 import io
 import json
 import os
@@ -20,7 +21,9 @@ class NotebookGridTests(unittest.TestCase):
             notebook = json.loads((ROOT / "notebooks" / name).read_text(encoding="utf-8"))
             cells = {cell.get("metadata", {}).get("id"): "".join(cell.get("source", []))
                      for cell in notebook["cells"]}
+            clone_id = "attack_clone" if name == "attack_algen_dped.ipynb" else "clone_branch"
             export_id = "attack_export_epsilon_sweep" if name == "attack_algen_dped.ipynb" else "embedding_privacy_sweep"
+            self.assertIn("BRANCH = 'robust-metodol'", cells[clone_id])
             smoke = cells["attack_smoke"]
             self.assertIn("check=True", cells[export_id])
             self.assertIn("persist_embedding_exports", cells[export_id])
@@ -103,6 +106,8 @@ class NotebookGridTests(unittest.TestCase):
                 try:
                     os.chdir(directory)
                     with mock.patch.dict(sys.modules, {"attacker_dped_sentence": attacker}), \
+                            mock.patch.object(importlib, "import_module", return_value=attacker), \
+                            mock.patch.object(importlib, "invalidate_caches"), \
                             contextlib.redirect_stdout(io.StringIO()):
                         exec(cells["attack_provenance_preflight"], environment)
                         exec(cells["attack_grid"], environment)
