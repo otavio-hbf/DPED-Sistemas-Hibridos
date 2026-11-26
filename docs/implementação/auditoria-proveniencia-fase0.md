@@ -46,7 +46,11 @@ repete a verificação de metadados e exige os hashes que o preflight observou,
 inclusive o hash combinado dos metadados e dos arquivos de geração. Exports
 antigos sem esses arquivos falham no preflight: não invente sua proveniência;
 recupere os dados originais ou gere novos exports. Smoke tests continuam
-identificados e separados dos resultados de pesquisa.
+identificados e separados dos resultados de pesquisa. O notebook persiste no
+Drive os exports assim que o sweep termina, o preflight e o smoke assim que
+cada etapa termina, e cada diretório de resultado logo após a execução de cada
+célula da grade. Tudo fica sob um diretório único por execução em
+`SIH/privEmbeddings/<RUN_ID>/`; a cópia final é uma sincronização adicional.
 
 O procedimento de teste adotado mantém o comportamento do código: primeiras
 frases elegíveis de `validation`, na ordem do dataset. O alinhamento usa

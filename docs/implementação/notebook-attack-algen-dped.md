@@ -15,7 +15,7 @@ Sequência de execução no Colab, no padrão de [dped_medium.ipynb](../../noteb
 4. **Grade de ataque.**
    - DPED: ε ∈ {1, 2, 4, 8} × `train_samples` ∈ {1, 10, 30, 100, 300, 500, 1000} × ridge. Saída em `results/attack/dped_eps<tag>/n<N>_r<R>/`.
    - Baseline `bert_pretrained`: mesma grade de `train_samples` e ridge. Usa o export de ε=8.0 para os IDs de tokens. Saída em `results/attack/bert_pretrained/`. As execuções da grade são identificadas por `--run_kind research`.
-5. **Cópia para o Drive.** `results/attack/` vai para `SIH/privEmbeddings/<data>/results_attack/`; `results/attack_smoke/` vai para `results_attack_smoke/`. A cópia não apaga smoke histórico já existente no destino; o notebook de análise o exclui pela classificação ou caminho.
+5. **Persistência incremental no Drive.** Cada execução recebe um diretório próprio `SIH/privEmbeddings/<RUN_ID>/`. Após o sweep de export, as tabelas (incluindo hashes e snapshots) são copiadas para `exports/research/`; o preflight e o smoke são salvos logo ao terminar; cada execução da grade é copiada para `results_attack/` antes de iniciar a próxima. Na variante de calibração, os exports reduzidos de CoLA também são copiados para `exports/sanity/` e permanecem separados da pesquisa SST-2. A cópia final repete a sincronização como verificação. Erros de geração interrompem a célula sem copiar artefatos incompletos.
 
 ## Decisões e limites
 

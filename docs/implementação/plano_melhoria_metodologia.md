@@ -20,6 +20,8 @@ Critério de conclusão: cada número publicado pode ser rastreado até um artef
 no Colab. Os artefatos históricos e um lock resolvido para o runtime efetivo
 ainda são necessários. Detalhes e procedimento de inventário em
 [auditoria-proveniencia-fase0.md](auditoria-proveniencia-fase0.md).
+Os notebooks persistem exports, preflight, smoke e cada resultado da grade no
+Drive imediatamente após a conclusão de cada etapa, sob um `RUN_ID` exclusivo.
 
 - [ ] Recuperar o PDF-fonte, os arquivos de resumo e as saídas por sentença da análise histórica.
 - [ ] Gerar hash (SHA-256) de cada matriz exportada e registrar, para cada rótulo de ε, o hash da matriz efetivamente carregada pelo script de ataque.
