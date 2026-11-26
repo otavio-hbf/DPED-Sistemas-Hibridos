@@ -8,6 +8,18 @@ Lê os resultados gravados por [attack_algen_dped.ipynb](../../notebooks/attack_
 
 `RESULTS_DIR` (padrão `/content/drive/MyDrive/SIH/privEmbeddings/2026-11-16/results_attack`). A leitura é recursiva: qualquer pasta com um `.json` (`summary.json`) e um `.csv` (`sentence_results.csv`) é uma execução. `epsilon`, `source` e `train_samples` vêm do conteúdo dos arquivos. O nome da pasta (`eps<a>p<b>`) só é usado se `epsilon` estiver vazio. A condição `BERT` é identificada por `source == bert_pretrained`.
 
+São excluídas pastas com `smoke` no nome, execuções classificadas como
+`smoke` ou `unclassified` e todas as execuções históricas sem classificação na
+célula DPED ε=8, n=10. Uma nova execução explicitamente classificada como
+`research` nessa célula é aceita. Outras execuções históricas sem classificação
+também são excluídas por padrão. Somente após conferir manualmente que não são
+smoke, pode-se definir `ALLOW_UNVERIFIED_LEGACY = True` para carregá-las com
+aviso; a célula histórica contaminada continua excluída. Nenhum resultado
+histórico é recalculado sem os arquivos brutos.
+O carregamento também compara hashes de seleção de frases quando presentes e
+interrompe a análise se forem divergentes. A ausência desses hashes é
+explicitamente sinalizada.
+
 ## Saída
 
 Figuras (`figs/`) e tabelas (`tables/`) em `analysis_attack/`, irmã de `results_attack/` (desligue com `SAVE_OUTPUTS = False`).

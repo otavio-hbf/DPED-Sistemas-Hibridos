@@ -3,6 +3,7 @@
 
 import os
 import argparse
+import hashlib
 import json
 from datetime import datetime
 import numpy as np
@@ -20,6 +21,7 @@ from privacy import (
     embedding_noise_multiplier,
     privatize_embedding_table,
 )
+from run_provenance import capture_execution, write_execution
 from training import train_model_with_dpsgd, train_model_without_dp, test_model
 
 def parse_args():
@@ -252,7 +254,8 @@ def _full_tokenizer_ids(tokenizer, embedding_rows):
     return token_ids
 
 
-def save_dped_student_embeddings(model, tokenizer, token_ids, output_dir, privacy_metadata=None):
+def save_dped_student_embeddings(model, tokenizer, token_ids, output_dir, privacy_metadata=None,
+                                 config=None, generation_provenance=None):
     """Save privatized Student lookup vectors with aligned token IDs and labels."""
     token_ids = [int(token_id) for token_id in token_ids]
     if not token_ids:
@@ -276,12 +279,31 @@ def save_dped_student_embeddings(model, tokenizer, token_ids, output_dir, privac
     with open(os.path.join(output_dir, "token_labels.json"), "w", encoding="utf-8") as f:
         json.dump(token_labels, f, ensure_ascii=True, indent=2)
 
+    if config is not None:
+        with open(os.path.join(output_dir, "generation_config.json"), "w", encoding="utf-8") as f:
+            json.dump(vars(config), f, indent=2, sort_keys=True, allow_nan=False)
+    if generation_provenance is not None:
+        write_execution(os.path.dirname(os.path.abspath(__file__)), generation_provenance, output_dir, "generation")
+
     with open(os.path.join(output_dir, "metadata.txt"), "w", encoding="utf-8") as f:
         f.write("stage=after_dped_distillation_before_downstream_finetuning\n")
         f.write("representation=student_word_embedding_lookup\n")
         f.write(f"shape={tuple(embeddings.shape)}\n")
         f.write("row_alignment=token_ids.npy and token_labels.json\n")
         f.write("files=token_embeddings.pt,token_embeddings.npy,token_ids.npy,token_labels.json\n")
+        model_config = getattr(getattr(model, "bert", None), "config", None)
+        f.write(f"pretrained_model_revision={getattr(model_config, '_commit_hash', None)}\n")
+        f.write(f"tokenizer_revision={getattr(tokenizer, 'init_kwargs', {}).get('_commit_hash')}\n")
+        for filename in ("token_embeddings.npy", "token_ids.npy"):
+            digest = hashlib.sha256()
+            with open(os.path.join(output_dir, filename), "rb") as source:
+                for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            f.write(f"{filename}_sha256={digest.hexdigest()}\n")
+        if config is not None:
+            f.write("generation_config=generation_config.json\n")
+        if generation_provenance is not None:
+            f.write("generation_provenance=generation_provenance.json\n")
         if privacy_metadata:
             for key, value in sorted(privacy_metadata.items()):
                 f.write(f"{key}={value}\n")
@@ -410,6 +432,11 @@ def run_method(method, train_dataset, eval_dataset, test_dataset, public_dataset
     print(f"Task: {config.task_name}")
     print(f"Epsilon: {config.epsilon}")
     print(f"{'='*80}")
+    generation_provenance = None
+    if method == "dp-distill":
+        generation_provenance = capture_execution(
+            os.path.dirname(os.path.abspath(__file__)), {"method": method, "config": vars(config)}
+        )
     
     # Create appropriate model based on dataset and task
     if config.dataset_name == "conll2003":
@@ -489,6 +516,8 @@ def run_method(method, train_dataset, eval_dataset, test_dataset, public_dataset
             token_ids,
             os.path.join(_embedding_run_dir(config, method), "dped_student_pre_downstream"),
             privacy_metadata=privacy_metadata,
+            config=config,
+            generation_provenance=generation_provenance,
         )
 
         if getattr(config, "skip_downstream", False):
@@ -624,6 +653,10 @@ def run_privacy_utility_tradeoff(train_dataset, eval_dataset, test_dataset, publ
 
 def run_embedding_privacy_sweep(train_dataset, config, device):
     """Train one teacher ensemble and release one full-vocabulary table per epsilon."""
+    generation_provenance = capture_execution(
+        os.path.dirname(os.path.abspath(__file__)),
+        {"method": "dp-distill", "embedding_privacy_sweep": True, "config": vars(config)},
+    )
     epsilon_values = [1.0, 2.0, 4.0, 8.0]
     print(
         "Privacy note: each exported table has its own epsilon target. "
@@ -704,6 +737,8 @@ def run_embedding_privacy_sweep(train_dataset, config, device):
             token_ids,
             output_dir,
             privacy_metadata=privacy_metadata,
+            config=config,
+            generation_provenance=generation_provenance,
         )
         print(
             f"Embedding release [{sweep_index}/{len(epsilon_values)}]: "

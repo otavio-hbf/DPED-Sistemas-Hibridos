@@ -1,4 +1,5 @@
 import json
+import hashlib
 import os
 import tempfile
 import unittest
@@ -55,6 +56,25 @@ class EmbeddingExportTests(unittest.TestCase):
         np.testing.assert_array_equal(token_ids, [0, 1, 2, 3, 4])
         self.assertEqual(token_labels, ["token-0", "token-1", "token-2", "token-3", "token-4"])
         np.testing.assert_array_equal(token_embeddings, embedding_weights.numpy())
+
+    def test_saves_generation_config_and_export_hashes(self):
+        model = SimpleNamespace(bert=SimpleNamespace(embeddings=SimpleNamespace(
+            word_embeddings=SimpleNamespace(weight=torch.arange(20, dtype=torch.float32).reshape(5, 4))
+        )))
+        config = SimpleNamespace(seed=42, num_teachers=5, epsilon=8.0)
+        with tempfile.TemporaryDirectory() as output_dir:
+            save_dped_student_embeddings(
+                model, _Tokenizer(), list(range(5)), output_dir,
+                privacy_metadata={"noise_std": 0.25}, config=config,
+            )
+            with open(os.path.join(output_dir, "generation_config.json"), encoding="utf-8") as f:
+                self.assertEqual(json.load(f), vars(config))
+            with open(os.path.join(output_dir, "metadata.txt"), encoding="utf-8") as f:
+                metadata = dict(line.rstrip("\n").split("=", 1) for line in f)
+            for name in ("token_embeddings.npy", "token_ids.npy"):
+                with open(os.path.join(output_dir, name), "rb") as f:
+                    self.assertEqual(metadata[f"{name}_sha256"], hashlib.sha256(f.read()).hexdigest())
+            self.assertEqual(metadata["noise_std"], "0.25")
 
 
 if __name__ == "__main__":

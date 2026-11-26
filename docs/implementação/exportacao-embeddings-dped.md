@@ -30,6 +30,13 @@ results/embeddings/glue_sst2_dp-distill_eps8p0/dped_student_pre_downstream/
 | `token_ids.npy` | Todos os IDs do vocabulario do tokenizer em ordem crescente. |
 | `token_labels.json` | Tokens BERT em ordem correspondente a `token_ids.npy` e as linhas de `token_embeddings`. |
 | `metadata.txt` | Etapa, representacao, alinhamento e parametros de privacidade da liberacao: epsilon, delta, limite, sensibilidade e ruido. |
+| `generation_config.json` | Valores efetivos de `Config` para a tabela exportada. |
+| `generation_provenance.json`, `generation_code.zip` | Revisão, hashes e snapshot do código, configuração inicial e ambiente observados na geração. |
+| `generation_requirements.observed.txt` | Versões instaladas observadas, sem garantia de lock resolvido ou hashes dos pacotes. |
+
+O `metadata.txt` das novas execuções inclui os hashes SHA-256 da matriz e dos
+IDs. Veja [auditoria-proveniencia-fase0.md](auditoria-proveniencia-fase0.md)
+para limites de reprodutibilidade e tratamento de exports antigos.
 
 O export legado no diretorio da execucao continua sendo gravado depois do treinamento downstream. Ele representa o estado final do modelo; seus arquivos de labels por split continuam representando classes da tarefa e nao devem ser usados como labels lexicais para estes vetores.
 
