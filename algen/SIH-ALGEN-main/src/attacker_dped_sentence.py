@@ -37,9 +37,17 @@ from eval_metrics import get_rouge_scores
 from inversion_utils import set_seed, add_punctuation_token_ids, get_Y_embeddings_from_tokens
 
 
-def load_static_embeddings(export_dir, source, bert_model, special_ids):
-    token_ids_path = os.path.join(export_dir, "token_ids.npy")
-    token_ids = np.load(token_ids_path)
+def load_static_embeddings(export_dir, source, bert_model, special_ids, vocab_size=None):
+    if export_dir is not None:
+        token_ids_path = os.path.join(export_dir, "token_ids.npy")
+        token_ids = np.load(token_ids_path)
+    elif source == "bert_pretrained":
+        if vocab_size is None:
+            raise ValueError("vocab_size is required when export_dir is omitted for bert_pretrained.")
+        token_ids_path = None
+        token_ids = np.arange(vocab_size, dtype=np.int64)
+    else:
+        raise ValueError(f"--export_dir is required for source={source}.")
 
     if source == "dped":
         table_path = os.path.join(export_dir, "token_embeddings.npy")
@@ -63,8 +71,8 @@ def load_static_embeddings(export_dir, source, bert_model, special_ids):
         "table_shape": list(table.shape),
         "table_dtype": table.dtype.str,
         "token_ids_array_sha256": array_sha256(token_ids),
-        "token_ids_file_sha256": file_sha256(token_ids_path),
-        "export_dir": os.path.abspath(export_dir),
+        "token_ids_file_sha256": file_sha256(token_ids_path) if token_ids_path is not None else None,
+        "export_dir": os.path.abspath(export_dir) if export_dir is not None else None,
     }
     if source == "dped":
         provenance["table_file_sha256"] = file_sha256(table_path)
@@ -137,6 +145,27 @@ def pool_sentences(token_lists, table, row_of, allowed):
     return X, kept
 
 
+def pool_contextual_sentences(sentences, indices, bert_model, bert_tok, max_length=32, batch_size=128):
+    """Mean-pool contextual last_hidden_state from BERT for the selected sentence indices (ALGEN baseline)."""
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    encoder = AutoModel.from_pretrained(bert_model).to(device)
+    encoder.eval()
+    selected = [sentences[i] for i in indices]
+    chunks = []
+    with torch.no_grad():
+        for start in range(0, len(selected), batch_size):
+            batch = selected[start:start + batch_size]
+            enc = bert_tok(batch, padding=True, truncation=True, max_length=max_length, return_tensors="pt").to(device)
+            hidden = encoder(**enc).last_hidden_state
+            mask = enc["attention_mask"].unsqueeze(-1).to(hidden.dtype)
+            pooled = (hidden * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1e-9)
+            chunks.append(F.normalize(pooled, p=2, dim=1).cpu())
+    del encoder
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    return torch.cat(chunks, dim=0)
+
+
 class DPEDSentenceDecoder(DecoderInference):
     """
     Reuses the ALGEN decoder, ridge mapping and test(). Only the construction of X/Y is replaced.
@@ -144,11 +173,15 @@ class DPEDSentenceDecoder(DecoderInference):
     initialize_embeddings is overridden, so no random vectors are used.
     """
 
-    def __init__(self, checkpoint_path, X_train, train_texts, X_test, test_texts, reg_lambda):
+    def __init__(self, checkpoint_path, X_train, train_texts, X_test, test_texts, reg_lambda,
+                 center=False, normalize_aligned=False, oracle_mode=False):
         self.X_train_np = X_train
         self.train_texts = train_texts
         self.X_test_np = X_test
         self.test_texts = test_texts
+        self.center = center
+        self.normalize_aligned = normalize_aligned
+        self.oracle_mode = oracle_mode
         super().__init__(checkpoint_path, "random",
                          len(train_texts), len(test_texts), "sst2",
                          regularization=True, reg_lambda=reg_lambda)
@@ -161,16 +194,44 @@ class DPEDSentenceDecoder(DecoderInference):
         Y_test_tokens = add_punctuation_token_ids(self.test_texts, tokenizer, max_length, self.device)
         Y_train = get_Y_embeddings_from_tokens(Y_train_tokens, encoder, normalization=True)
         Y_test = get_Y_embeddings_from_tokens(Y_test_tokens, encoder, normalization=True)
+        self.Y_train_ref = Y_train
+        self.Y_test_ref = Y_test
 
-        X_train = self.X_train_np.to(self.device)
-        X_test = self.X_test_np.to(self.device)
-        _, T = self.mapping_X_to_Y_pooled(X_train, Y_train, self.reg_lambda)
-        self.source_hidden_dim, self.target_hidden_dim = T.shape
+        if self.oracle_mode:
+            X_test_aligned = Y_test
+            self.source_hidden_dim, self.target_hidden_dim = Y_test.shape[1], Y_test.shape[1]
+        else:
+            X_train = self.X_train_np.to(self.device)
+            X_test = self.X_test_np.to(self.device)
+            if self.center:
+                x_mean = X_train.mean(dim=0, keepdim=True)
+                y_mean = Y_train.mean(dim=0, keepdim=True)
+                _, T = self.mapping_X_to_Y_pooled(X_train - x_mean, Y_train - y_mean, self.reg_lambda)
+                X_test_aligned = (X_test - x_mean) @ T + y_mean
+            else:
+                _, T = self.mapping_X_to_Y_pooled(X_train, Y_train, self.reg_lambda)
+                X_test_aligned = X_test @ T
+            self.source_hidden_dim, self.target_hidden_dim = T.shape
 
-        X_test_aligned = X_test @ T
+        raw_norms = X_test_aligned.norm(p=2, dim=1)
+        if self.normalize_aligned and not self.oracle_mode:
+            X_test_aligned = F.normalize(X_test_aligned, p=2, dim=1)
+
+        cos_matrix = Y_test @ Y_test.T
+        n_test = Y_test.shape[0]
+        anisotropy = float((cos_matrix.sum() - torch.trace(cos_matrix)) / max(n_test * (n_test - 1), 1))
+
         self.per_sentence_cosine = F.cosine_similarity(X_test_aligned, Y_test, dim=1).detach().cpu().numpy()
-        self.align_metrics = {"X_Y_test_COS": float(self.per_sentence_cosine.mean()),
-                              "reg_lambda": self.reg_lambda}
+        self.align_metrics = {
+            "X_Y_test_COS": float(self.per_sentence_cosine.mean()),
+            "reg_lambda": self.reg_lambda,
+            "center": self.center,
+            "normalize_aligned": self.normalize_aligned,
+            "oracle_mode": self.oracle_mode,
+            "aligned_norm_mean": float(raw_norms.mean()),
+            "aligned_norm_std": float(raw_norms.std(unbiased=False)),
+            "anisotropy_y_test_mean_cosine": anisotropy,
+        }
 
         self.test_data = {
             "hidden_states": X_test_aligned,
@@ -178,17 +239,37 @@ class DPEDSentenceDecoder(DecoderInference):
             "texts": tokenizer.batch_decode(Y_test_tokens["input_ids"], skip_special_tokens=True),
         }
 
+    def evaluate_constant_baseline(self):
+        self.trainer.model.eval()
+        y_const = F.normalize(self.Y_train_ref.mean(dim=0, keepdim=True), p=2, dim=1)
+        y_const_batch = y_const.expand(len(self.test_data["texts"]), -1).to(self.device)
+        with torch.no_grad():
+            generated_ids = self.trainer.model.generate({
+                "hidden_states": y_const_batch,
+                "attention_mask": self.test_data["attention_mask"].to(self.device),
+            })
+            const_preds = [t.strip() for t in self.trainer.tokenizer.batch_decode(generated_ids, skip_special_tokens=True)]
+        const_eval = self.trainer.eval_texts(const_preds, self.test_data["texts"])
+        const_cos = float(F.cosine_similarity(y_const_batch, self.Y_test_ref, dim=1).mean())
+        return {
+            "sample_prediction": const_preds[0] if const_preds else "",
+            "cosine": const_cos,
+            "test_results": const_eval,
+        }
+
 
 def main():
     parser = argparse.ArgumentParser(description="Sentence-level ALGEN attack on DPED embeddings.")
     parser.add_argument("--checkpoint_path", required=True, help="ALGEN decoder checkpoint directory.")
-    parser.add_argument("--export_dir", required=True, help="DPED export dir with full-vocabulary token_ids and token_embeddings.")
-    parser.add_argument("--source", choices=["dped", "bert_pretrained"], default="dped")
+    parser.add_argument("--export_dir", default=None, help="DPED export dir (required for --source dped).")
+    parser.add_argument("--source", choices=["dped", "bert_pretrained", "bert_contextual", "oracle_target"], default="dped")
     parser.add_argument("--bert_model", default="bert-base-uncased")
     parser.add_argument("--epsilon", default=None, help="Label only, stored in the output.")
     parser.add_argument("--train_samples", type=int, required=True)
     parser.add_argument("--test_samples", type=int, default=200)
     parser.add_argument("--ridge", type=float, required=True)
+    parser.add_argument("--center", action="store_true", help="Center X and Y on train mean before fitting ridge.")
+    parser.add_argument("--normalize_aligned", action="store_true", help="L2-normalize X_test_aligned before decoding.")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--output_dir", required=True)
     parser.add_argument("--run_kind", choices=["research", "smoke"], default=None,
@@ -200,32 +281,41 @@ def main():
 
     if args.train_samples <= 0 or args.test_samples <= 0:
         parser.error("--train_samples and --test_samples must be positive.")
+    if args.source == "dped" and not args.export_dir:
+        parser.error("--export_dir is required when --source dped.")
 
     run_provenance = capture_execution(REPO_ROOT, args)
     set_seed(args.seed)
     bert_tok = AutoTokenizer.from_pretrained(args.bert_model)
     special_ids = set(bert_tok.all_special_ids)
 
-    table, row_of, allowed, provenance = load_static_embeddings(
-        args.export_dir, args.source, args.bert_model, special_ids
-    )
-    verify_expected_provenance(
-        provenance, args.expected_table_sha256, args.expected_token_ids_sha256,
-        args.expected_export_provenance_sha256,
-    )
-    if args.source == "dped" and args.run_kind == "research":
-        verify_dped_research(provenance, args.epsilon)
-    print(f"source={args.source} rows={table.shape[0]} allowed_content_tokens={len(allowed)}")
-    print(f"table_array_sha256={provenance['table_array_sha256']}")
-
     sst2 = datasets.load_dataset("glue", "sst2")
     train_sentences = sst2["train"]["sentence"]
     test_sentences = sst2["validation"]["sentence"]
+    train_token_lists = bert_tok(train_sentences, add_special_tokens=False)["input_ids"]
+    test_token_lists = bert_tok(test_sentences, add_special_tokens=False)["input_ids"]
 
-    X_train_all, kept_train = pool_sentences(
-        bert_tok(train_sentences, add_special_tokens=False)["input_ids"], table, row_of, allowed)
-    X_test_all, kept_test = pool_sentences(
-        bert_tok(test_sentences, add_special_tokens=False)["input_ids"], table, row_of, allowed)
+    if args.source in ("dped", "bert_pretrained"):
+        table, row_of, allowed, provenance = load_static_embeddings(
+            args.export_dir, args.source, args.bert_model, special_ids, vocab_size=bert_tok.vocab_size
+        )
+        verify_expected_provenance(
+            provenance, args.expected_table_sha256, args.expected_token_ids_sha256,
+            args.expected_export_provenance_sha256,
+        )
+        if args.source == "dped" and args.run_kind == "research":
+            verify_dped_research(provenance, args.epsilon)
+        print(f"source={args.source} rows={table.shape[0]} allowed_content_tokens={len(allowed)}")
+        print(f"table_array_sha256={provenance['table_array_sha256']}")
+
+        X_train_all, kept_train = pool_sentences(train_token_lists, table, row_of, allowed)
+        X_test_all, kept_test = pool_sentences(test_token_lists, table, row_of, allowed)
+    else:
+        allowed = {i for i in range(bert_tok.vocab_size) if i not in special_ids}
+        kept_train = [idx for idx, ids in enumerate(train_token_lists) if any(t in allowed for t in ids)]
+        kept_test = [idx for idx, ids in enumerate(test_token_lists) if any(t in allowed for t in ids)]
+        provenance = {"source": args.source, "bert_model": args.bert_model}
+        print(f"source={args.source} allowed_content_tokens={len(allowed)}")
 
     if args.train_samples > len(kept_train):
         raise ValueError(f"train_samples={args.train_samples} exceeds eligible train sentences ({len(kept_train)}).")
@@ -235,9 +325,17 @@ def main():
     rng = np.random.default_rng(args.seed)
     chosen = rng.choice(len(kept_train), size=args.train_samples, replace=False)
     train_idx = [kept_train[i] for i in chosen]
-    X_train = X_train_all[torch.as_tensor(chosen)]
     test_idx = kept_test[:args.test_samples]
-    X_test = X_test_all[:args.test_samples]
+
+    if args.source in ("dped", "bert_pretrained"):
+        X_train = X_train_all[torch.as_tensor(chosen)]
+        X_test = X_test_all[:args.test_samples]
+    elif args.source == "bert_contextual":
+        X_train = pool_contextual_sentences(train_sentences, train_idx, args.bert_model, bert_tok)
+        X_test = pool_contextual_sentences(test_sentences, test_idx, args.bert_model, bert_tok)
+    else:
+        X_train = torch.empty((len(train_idx), 1), dtype=torch.float32)
+        X_test = torch.empty((len(test_idx), 1), dtype=torch.float32)
     selection = {
         "train_split": "glue/sst2:train",
         "train_procedure": "numpy.default_rng(seed).choice eligible rows without replacement",
@@ -257,8 +355,12 @@ def main():
         X_train, [train_sentences[i] for i in train_idx],
         X_test, [test_sentences[i] for i in test_idx],
         args.ridge,
+        center=args.center,
+        normalize_aligned=args.normalize_aligned,
+        oracle_mode=(args.source == "oracle_target"),
     )
     gen_results, preds, refs = decoder.test()
+    constant_baseline = decoder.evaluate_constant_baseline()
     if not (len(preds) == len(refs) == len(decoder.per_sentence_cosine) == len(test_idx)):
         raise RuntimeError("Decoder output count does not match selected test sentences.")
     if (os.path.abspath(decoder.best_models[0][-1]) != checkpoint_provenance["checkpoint_path"]
@@ -297,7 +399,10 @@ def main():
             "target_model_revision": getattr(decoder.trainer.model.encoder_decoder.config, "_commit_hash", None),
             "target_tokenizer_revision": decoder.target_tokenizer.init_kwargs.get("_commit_hash"),
         },
-        "align_metrics": decoder.align_metrics, "test_results": gen_results,
+        "align_metrics": decoder.align_metrics,
+        "distinct_predictions": len(set(preds)),
+        "constant_baseline": constant_baseline,
+        "test_results": gen_results,
     }
     with open(os.path.join(args.output_dir, "summary.json"), "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2, default=float)
